@@ -1,0 +1,2 @@
+新增环境变量
+PYTHONPATH: ndtpy所在文件夹的全路径
