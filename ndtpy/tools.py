@@ -8,6 +8,12 @@ import ctypes.wintypes
 import win32con
 import functools
 import time
+import win32api
+import win32con
+import win32gui
+import win32process
+from pymouse import PyMouse
+from pykeyboard import PyKeyboard
 
 # Wayne:
 """
@@ -16,6 +22,7 @@ table of content:
     a. (function) func_timer
     b. (function) list_all_files
     c. (class) GlobalHotKeys
+    d. (class) GuiOperation
 2. Data processing:
     a. (function) peak_det
     b. (function) butter_bandpass_filter
@@ -73,13 +80,17 @@ class GlobalHotKeys:
     Datetime: 2019/5/17 11:00
 
     Example:
+    g = GlobalHotKeys()
 
-    from globalhotkeys import GlobalHotKeys
+    @GlobalHotKeys.register(GlobalHotKeys.VK_F1, GlobalHotKeys.MOD_SHIFT)
+    def shift_f1():
+        print('hello world')
 
-    @GlobalHotKeys.register(GlobalHotKeys.VK_F1)
-    def hello_world():
-        print 'Hello World'
+    # Q and ctrl will stop message loop
+    GlobalHotKeys.register(GlobalHotKeys.VK_Q, 0, False)
+    GlobalHotKeys.register(GlobalHotKeys.VK_C, GlobalHotKeys.MOD_CTRL, False)
 
+    # start main loop
     GlobalHotKeys.listen()
     """
 
@@ -160,6 +171,64 @@ class GlobalHotKeys:
                 self.user32.UnregisterHotKey(None, index)
 
 
+class GuiOperation:
+    """
+    Using package pywin32 to do some gui operations.
+
+    Author:   wangye
+    Datetime: 2019/5/18 22:00
+    """
+
+    def __init__(self):
+        self.mouse = PyMouse()
+        self.keyboard = PyKeyboard()
+        # 系统常量，标识最高权限打开一个进程
+        PROCESS_ALL_ACCESS = (0x000F0000 | 0x00100000 | 0xFFF)
+
+    def find_window(self, *key):
+        titles = set()
+
+        def loop_windows(hwnd, _):
+            if win32gui.IsWindow(hwnd) \
+                    and win32gui.IsWindowEnabled(hwnd) \
+                    and win32gui.IsWindowVisible(hwnd):
+                titles.add(win32gui.GetWindowText(hwnd))
+
+        win32gui.EnumWindows(loop_windows, 0)
+        wanted_window_handles = [win32gui.FindWindow(None, t) for t in titles if all([k in t for k in key])]
+        return wanted_window_handles
+
+    def get_windows_attr(self, hwnd):
+        if hwnd:
+            return win32gui.GetWindowText(hwnd), \
+                   win32gui.GetClassName(hwnd)
+        return '', ''
+
+    def bring_to_top(self, hwnd):
+        if hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+            win32gui.BringWindowToTop(hwnd)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except:
+                pass
+
+    def close_window(self, hwnd):
+        if hwnd:
+            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+
+    def get_window_rect(self, hwnd):
+        return win32gui.GetWindowRect(hwnd)
+
+    def get_child_windows(self, hwnd):
+        hwnd_child_list = []
+        win32gui.EnumChildWindows(hwnd, lambda hwnd, param: param.append(hwnd), hwnd_child_list)
+        return hwnd_child_list
+
+    def change_window_name(self, hwnd, new_name):
+        win32api.SendMessage(hwnd, win32con.WM_SETTEXT, 0, new_name)
+
+
 def peak_det(v, delta, x=None):
     """
     Converted from MATLAB script at http://billauer.co.il/peakdet.html
@@ -203,7 +272,7 @@ def peak_det(v, delta, x=None):
         print('Input argument delta must be a scalar')
 
     if delta <= 0:
-        sys.exit('Input argument delta must be positive')
+        print('Input argument delta must be positive')
 
     mn, mx = np.Inf, -np.Inf
     mnpos, mxpos = np.NaN, np.NaN
