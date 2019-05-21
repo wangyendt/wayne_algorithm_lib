@@ -29,6 +29,7 @@ table of content:
     c. (class) FindLocalExtremeValue
     d. (class) LoadData
     e. (class) DataProcessing
+    f. (class) ExtractRollingData
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
 """
@@ -304,7 +305,7 @@ def peak_det(v, delta, x=None):
     return np.array(maxtab), np.array(mintab)
 
 
-def butter_bandpass_filter(x):
+def butter_bandpass_filter(x, wn=0.2):
     """
     ButterWorth 低通滤波器
 
@@ -312,9 +313,10 @@ def butter_bandpass_filter(x):
     Datetime: 2019/4/24 16:00
 
     :param x: 待滤波矩阵, 2d-array
+    :param wn: wn系数，权衡失真和光滑
     :return: 滤波后矩阵, 2d-array
     """
-    b, a = signal.butter(N=2, Wn=0.2, btype='low')
+    b, a = signal.butter(N=2, Wn=wn, btype='low')
     return np.apply_along_axis(
         lambda y: signal.filtfilt(b, a, y),
         0, x
@@ -791,6 +793,161 @@ class DataProcessing:
                 self.force_signal[self.tds[ii] - self.bef - self.avg:self.tds[ii] - self.bef, :], 0
             )
         self.force = params.T
+
+
+class ExtractRollingData:
+    """
+    用于从滑动数据中提取数据
+
+    Author:   wangye
+    Datetime: 2019/5/22 02:41
+
+    example:
+    rd = ExtractRollingData(rawdata, f)
+    rd.simple_remove_base()
+    rd.find_peak()
+    rd.filt_data()
+    rd.show_fig()
+
+    # if not os.path.exists(r'result'):
+    #     os.mkdir(r'result')
+    # print(os.getcwd())
+    # np.savetxt(r'result\\' +
+    #            (f[:f.rindex('.')].replace('\\', '_')
+    #             if not rd.simple_file_name
+    #             else f[f.rindex('\\') + 1:f.rindex('.')]
+    #             ) + '_result.txt', rd.rawdata, fmt='%8.2f'
+    #            )
+    """
+
+    def __init__(self, data, f):
+        self.rawdata = data
+        self.filename = f
+        self.peaks = np.empty((0, 0))
+        self.remove_base_window = 50
+        self.find_peak_thd = 250
+        self.extend_data_length = 300
+        self.filtered_data = np.copy(data)
+        self.simple_file_name = True
+
+    def simple_remove_base(self):
+        def _remove_base(arr, window):
+            starts = arr[:window + 1]
+            ends = arr[-(window + 1):]
+            """
+            正态性检验:
+
+            1. Shapiro-Wilk test
+            方法：scipy.stats.shapiro(x)
+            官方文档：SciPy v1.1.0 Reference Guide
+            参数：x - 待检验数据
+            返回：W - 统计数；p-value - p值
+
+            2. scipy.stats.kstest
+            方法：scipy.stats.kstest (rvs, cdf, args = ( ), N = 20, alternative ='two-sided', mode ='approx')
+            官方文档：SciPy v0.14.0 Reference Guide
+            参数：rvs - 待检验数据，可以是字符串、数组；
+            cdf - 需要设置的检验，这里设置为 norm，也就是正态性检验；
+            alternative - 设置单双尾检验，默认为 two-sided
+            返回：W - 统计数；p-value - p值
+
+            3. scipy.stats.normaltest
+            方法：scipy.stats.normaltest (a, axis=0)
+            该方法专门用来检验数据是否为正态性分布，官方文档的描述为：
+            Tests whether a sample differs from a normal distribution.
+            This function tests the null hypothesis that a sample comes from a normal distribution. It is based on D’Agostino and Pearson’s [R251], [R252] test that combines skew and kurtosis to produce an omnibus test of normality.
+            官方文档：SciPy v0.14.0 Reference Guide
+            参数：a - 待检验数据；axis - 可设置为整数或置空，如果设置为 none，则待检验数据被当作单独的数据集来进行检验。该值默认为 0，即从 0 轴开始逐行进行检验。
+            返回：k2 - s^2 + k^2，s 为 skewtest 返回的 z-score，k 为 kurtosistest 返回的 z-score，即标准化值；p-value - p值
+
+            4. Anderson-Darling test
+            方法：scipy.stats.anderson (x, dist ='norm' )
+            该方法是由 scipy.stats.kstest 改进而来的，可以做正态分布、指数分布、Logistic 分布、Gumbel 分布等多种分布检验。默认参数为 norm，即正态性检验。
+            官方文档：SciPy v1.1.0 Reference Guide
+            参数：x - 待检验数据；dist - 设置需要检验的分布类型
+            返回：statistic - 统计数；critical_values - 评判值；significance_level - 显著性水平
+
+            Case 0: The mean {\displaystyle \mu } \mu  and the variance {\displaystyle \sigma ^{2}} \sigma ^{2} are both known.
+            Case 1: The variance {\displaystyle \sigma ^{2}} \sigma ^{2} is known, but the mean {\displaystyle \mu } \mu  is unknown.
+            Case 2: The mean {\displaystyle \mu } \mu  is known, but the variance {\displaystyle \sigma ^{2}} \sigma ^{2} is unknown.
+            Case 3: Both the mean {\displaystyle \mu } \mu  and the variance {\displaystyle \sigma ^{2}} \sigma ^{2} are unknown.
+
+            Case	n	    15%	    10%	    5%	    2.5%	1%
+            0	    >=5 	1.621	1.933	2.492	3.070	3.878
+            1			    0.908	1.105	1.304	1.573
+            2	    >=5		1.760	2.323	2.904	3.690
+            3	    10	    0.514	0.578	0.683	0.779	0.926
+                    20	    0.528	0.591	0.704	0.815	0.969
+                    50	    0.546	0.616	0.735	0.861	1.021
+                    100	    0.559	0.631	0.754	0.884	1.047
+                    Inf 	0.576	0.656	0.787	0.918	1.092
+            """
+            test_result_starts = sp.stats.anderson(
+                np.diff(starts), dist='norm'
+            )
+            test_result_ends = sp.stats.anderson(
+                np.diff(starts), dist='norm'
+            )
+            # if window == 50
+            standard50 = [0.546, 0.616, 0.735, 0.861, 1.021]
+            assert all([x > y - 0.02 for x, y in zip(
+                test_result_starts.critical_values,
+                standard50
+            )])
+            assert all([x > y - 0.02 for x, y in zip(
+                test_result_ends.critical_values,
+                standard50
+            )])
+            x_start, y_start = window // 2, starts.mean()
+            x_end, y_end = len(arr) - window // 2, ends.mean()
+            assert x_start < x_end
+            k = (y_end - y_start) / max(x_end - x_start, 1)
+            b = y_start - x_start * k
+            arr -= k * np.arange(len(arr)) + b
+            return arr
+
+        self.rawdata = np.apply_along_axis(
+            lambda x: _remove_base(x, self.remove_base_window), 0, self.rawdata
+        )
+
+    def find_peak(self):
+        self.peaks = []
+        for i in range(self.rawdata.shape[1]):
+            peak = peak_det(
+                self.rawdata[:, i], self.find_peak_thd
+            )[0]
+            peak = peak[peak[:, 1].argmax()]
+            self.peaks.append(peak)
+        self.peaks = np.array(self.peaks)
+
+    def filt_data(self):
+        scale = np.array([max(0, self.peaks[:, 0].min() - self.extend_data_length),
+                          min(self.rawdata.shape[0] - 1, self.peaks[:, 0].max() + self.extend_data_length)
+                          ], dtype=np.int
+                         )
+        self.rawdata = self.rawdata[scale[0]:scale[1] + 1]
+        self.peaks[:, 0] -= scale[0]
+        self.filtered_data = butter_bandpass_filter(self.rawdata, 0.1)
+
+    def show_fig(self):
+        plt.rcParams['font.family'] = 'YouYuan'
+        plt.rcParams['font.size'] = 16
+        plt.rcParams['axes.unicode_minus'] = False
+        fig = plt.figure()
+        fig.set_size_inches(60, 10)
+        plt.plot(self.rawdata, 'r', linewidth=1)
+        plt.plot(self.filtered_data, 'b--', linewidth=1)
+        n = self.rawdata.shape[1]
+        lgd = ['raw' + str(ch + 1) for ch in range(n)]
+        lgd += ['filtered_raw' + str(ch + 1) for ch in range(n)]
+        for i in range(len(self.peaks)):
+            plt.plot(self.peaks[i, 0], self.peaks[i, 1], 'k.', markersize=10)
+        lgd += ['peak' + str(ch + 1) for ch in range(n)]
+        plt.legend(lgd)
+        plt.xlabel('Time: frame')
+        plt.ylabel('ADC')
+        plt.title(self.filename)
+        plt.show()
 
 
 def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
