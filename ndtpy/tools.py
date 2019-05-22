@@ -367,13 +367,14 @@ class FindLocalExtremeValue:
                 第四个local_extreme_real_value是指局部极值实际的值
         """
 
-        assert self.local_window + 2 <= x.shape[0]
+        assert self.local_window + 2 <= x.shape[0] and x.shape[0] >= 4
         x = x.astype(np.float)
         m = len(x)
 
         local_diff, local_gap, min_slope, max_slope, local_extreme_real_value = 0, 0, np.inf, -np.inf, 0
         local_x = 0
         update_num = 0
+        queue = []
         for j in range(1, self.local_window):
             if j + 2 * self.min_slp_step <= m:
                 min_slope = np.min((
@@ -388,9 +389,12 @@ class FindLocalExtremeValue:
                      x[-j - 2 * self.max_slp_step:-j - self.max_slp_step].mean()
                      ) / self.max_slp_step
                 ))
-            a = x[-1] - x[-1 - j]
-            b = x[-1] - x[-1 - j - 1]
-            c = x[-1] - x[-1 - j - 2]
+            if not queue:
+                queue = [x[-1] - x[-2], x[-1] - x[-3], x[-1] - x[-4]]  # init
+            else:
+                queue.pop(0)
+                queue.append(x[-1] - x[-1 - j - 2])
+            a, b, c = queue
             if 0 == local_x:
                 if max(abs(a), abs(b), abs(c)) > self.min_valid_slp_thd:
                     local_x = a
