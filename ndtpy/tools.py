@@ -179,6 +179,33 @@ class GuiOperation:
 
     Author:   wangye
     Datetime: 2019/5/18 22:00
+
+    example:
+        gui = GuiOperation()
+    notepad = gui.find_window('tt')[0]
+    gui.bring_to_top(notepad)
+    time.sleep(2)
+    st_test_software = gui.find_window('ST')[0]
+    gui.bring_to_top(st_test_software)
+
+    for h in gui.get_child_windows(st_test_software):
+        ttl, cls = gui.get_windows_attr(h)
+        print(ttl, cls)
+        if '&Read' in ttl:
+            print('-------')
+            left, top, right, bottom = gui.get_window_rect(h)
+            print(left, top, right, bottom)
+            gui.mouse.move((left + right) // 2, (top + bottom) // 2)
+            time.sleep(0.2)
+            gui.change_window_name(h, 'shit')
+
+    for proc in psutil.process_iter():
+        try:
+            pinfo = proc.as_dict(attrs=['pid', 'name'])
+        except psutil.NoSuchProcess:
+            pass
+        else:
+            print(pinfo)
     """
 
     def __init__(self):
@@ -206,6 +233,10 @@ class GuiOperation:
                    win32gui.GetClassName(hwnd)
         return '', ''
 
+    def maximize_window(self, hwnd):
+        if hwnd:
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+
     def bring_to_top(self, hwnd):
         if hwnd:
             win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
@@ -223,9 +254,22 @@ class GuiOperation:
         return win32gui.GetWindowRect(hwnd)
 
     def get_child_windows(self, hwnd):
-        hwnd_child_list = []
-        win32gui.EnumChildWindows(hwnd, lambda hwnd, param: param.append(hwnd), hwnd_child_list)
-        return hwnd_child_list
+        hwnd_child_list = set()
+        stack = [hwnd]
+        while stack:
+            s = stack.pop()
+            if s in hwnd_child_list:
+                continue
+            sub_hwnd_child_list = []
+            try:
+                win32gui.EnumChildWindows(
+                    s, lambda h, p: p.append(h), sub_hwnd_child_list
+                )
+                [stack.append(sh) for sh in sub_hwnd_child_list]
+                [hwnd_child_list.add(sh) for sh in sub_hwnd_child_list]
+            except:
+                continue
+        return list(hwnd_child_list)
 
     def change_window_name(self, hwnd, new_name):
         win32api.SendMessage(hwnd, win32con.WM_SETTEXT, 0, new_name)
