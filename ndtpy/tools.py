@@ -12,6 +12,7 @@ import time
 import win32api
 import win32con
 import win32gui
+import win32clipboard
 import win32process
 from pymouse import PyMouse
 from pykeyboard import PyKeyboard
