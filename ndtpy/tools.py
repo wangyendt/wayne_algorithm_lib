@@ -857,6 +857,7 @@ class ExtractRollingData:
     rd.simple_remove_base()
     rd.find_peak()
     rd.filt_data()
+    rd.find_filt_peak()
     rd.show_fig()
 
     # if not os.path.exists(r'result'):
@@ -978,6 +979,25 @@ class ExtractRollingData:
         self.rawdata = self.rawdata[scale[0]:scale[1] + 1]
         self.peaks[:, 0] -= scale[0]
         self.filtered_data = butter_bandpass_filter(self.rawdata, 0.1)
+
+    def find_filt_peak(self):
+        self.filt_peaks = []
+        for i in range(self.filtered_data.shape[1]):
+            peak = peak_det(
+                self.filtered_data[:, i], self.find_peak_thd
+            )[0]
+            peak = peak[peak[:, 1].argmax()]
+            self.filt_peaks.append(peak)
+        self.filt_peaks = np.array(self.filt_peaks)
+
+        scale = np.array([max(0, self.filt_peaks[:, 0].min() - self.extend_data_length),
+                          min(self.filt_peaks.shape[0] - 1, self.filt_peaks[:, 0].max() + self.extend_data_length // 2)
+                          ], dtype=np.int
+                         )
+        self.rawdata = self.rawdata[scale[0]:scale[1] + 1]
+        self.filtered_data = self.filtered_data[scale[0]:scale[1] + 1]
+        self.peaks[:, 0] -= scale[0]
+        self.filt_peaks[:, 0] -= scale[0]
 
     def show_fig(self):
         plt.rcParams['font.family'] = 'YouYuan'
