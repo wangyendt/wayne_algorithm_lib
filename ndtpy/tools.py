@@ -1,21 +1,21 @@
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import scipy as sp
-from scipy import signal
 import ctypes
 import ctypes.wintypes
-import win32con
 import functools
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import pandas as pd
+import scipy as sp
 import time
 import win32api
+import win32clipboard
+import win32con
 import win32con
 import win32gui
-import win32clipboard
 import win32process
-from pymouse import PyMouse
 from pykeyboard import PyKeyboard
+from pymouse import PyMouse
+from scipy import signal
 
 # Wayne:
 """
@@ -48,7 +48,7 @@ def func_timer(func):
     return wrapper
 
 
-def list_all_files(root: str, keys: list, outliers: list):
+def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     """
     列出某个文件下所有文件的全路径
 
@@ -70,7 +70,7 @@ def list_all_files(root: str, keys: list, outliers: list):
         if os.path.isfile(path) \
                 and all([k in path for k in keys]) \
                 and not any([o in path for o in outliers]):
-            _files.append(path)
+            _files.append(os.path.abspath(path) if full_path else path)
     return _files
 
 
