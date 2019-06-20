@@ -1,12 +1,13 @@
 import ctypes
 import ctypes.wintypes
 import functools
+import os
+import time
+
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 import pandas as pd
 import scipy as sp
-import time
 import win32api
 import win32clipboard
 import win32con
@@ -66,7 +67,7 @@ def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     for i in range(len(_list)):
         path = os.path.join(root, _list[i])
         if os.path.isdir(path):
-            _files.extend(list_all_files(path, keys, outliers))
+            _files.extend(list_all_files(path, keys, outliers, full_path))
         if os.path.isfile(path) \
                 and all([k in path for k in keys]) \
                 and not any([o in path for o in outliers]):
