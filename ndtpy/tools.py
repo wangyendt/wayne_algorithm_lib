@@ -33,6 +33,7 @@ table of content:
     d. (class) LoadData
     e. (class) DataProcessing
     f. (class) ExtractRollingData
+    g. (class) CurveSimilarity
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
 """
@@ -1019,6 +1020,91 @@ class ExtractRollingData:
         plt.ylabel('ADC')
         plt.title(self.filename)
         plt.show()
+
+
+class CurveSimilarity:
+    """
+    用于计算曲线x和曲线y的相似度
+
+    Author:   wangye
+    Datetime: 2019/6/24 23:17
+
+    https://zhuanlan.zhihu.com/p/69170491?utm_source=wechat_session&utm_medium=social&utm_oi=664383466599354368
+    Example:
+    # cs = CurveSimilarity()
+    # s1 = np.array([1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1])
+    # s2 = np.array([0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2])
+    # s3 = np.array([0.8, 1.5, 0, 1.2, 0, 0, 0.6, 1, 1.2, 0, 0, 1, 0.2, 2.4, 0.5, 0.4])
+    # print(cs.dtw(s1, s2))
+    # print(cs.dtw(s1, s3))
+    """
+
+    @staticmethod
+    def _check(var):
+        if np.ndim(var) == 1:
+            return np.reshape(var, (-1, 1))
+        else:
+            return np.array(var)
+
+    def dtw(self, x, y, mode='global', *params):
+        """
+        计算曲线x和曲线y的DTW距离，其中global方法将全部数据用于DTW计算，local方法将一部分数据用于DTW计算
+        x和y的行数代表数据长度，需要x和y的列数相同
+        :param x: 第一条曲线
+        :param y: 第二条曲线
+        :param mode: 'local'用于计算局部DTW，'global'用于计算全局DTW
+        :param params: 若为local DTW，则params为local的窗长
+        :return: 曲线x和曲线y的DTW距离
+        """
+        x, y = self._check(x), self._check(y)
+        m, n, p = x.shape[0], y.shape[0], x.shape[1]
+        assert x.shape[1] == y.shape[1]
+        distance = np.reshape(
+            [(x[i, ch] - y[j, ch]) ** 2 for i in range(m) for j in range(n) for ch in range(p)],
+            [m, n, p]
+        )
+        dp = np.zeros((m, n, p))
+        dp[0, 0, 0] = distance[0, 0, 0]
+        for i in range(1, m):
+            dp[i, 0] = dp[i - 1, 0] + distance[i, 0]
+        for j in range(1, n):
+            dp[0, j] = dp[0, j - 1] + distance[0, j]
+        for i in range(1, m):
+            for j in range(1, n):
+                for ch in range(p):
+                    dp[i, j, ch] = min(
+                        dp[i - 1, j - 1, ch],
+                        dp[i - 1, j, ch],
+                        dp[i, j - 1, ch]
+                    ) + distance[i, j, ch]
+        path = [[[m - 1, n - 1]] for _ in range(p)]
+        for ch in range(p):
+            pm, pn = m - 1, n - 1
+            while pm > 0 and pn > 0:
+                if pm == 0:
+                    pn -= 1
+                elif pn == 0:
+                    pm -= 1
+                else:
+                    c = np.argmin([dp[pm - 1, pn, ch], dp[pm, pn - 1, ch], dp[pm - 1, pn - 1, ch]])
+                    if c == 0:
+                        pm -= 1
+                    elif c == 1:
+                        pn -= 1
+                    else:
+                        pm -= 1
+                        pn -= 1
+                path[ch].append([pm, pn])
+            path[ch].append([0, 0])
+        ret = [[(x[path[ch][pi][0], ch] - y[path[ch][pi][1], ch]) ** 2
+                for pi in range(len(path[ch]))] for ch in range(p)]
+        if mode == 'global':
+            return np.squeeze([np.mean(r) for r in ret])
+        elif mode == 'local':
+            k = params[0]
+            return np.squeeze([
+                np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
+            ])
 
 
 def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
