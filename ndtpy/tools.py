@@ -1,9 +1,14 @@
+import collections
 import ctypes
 import ctypes.wintypes
 import functools
+import functools
+import itertools
+import operator as op
 import os
 import time
 
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -36,6 +41,7 @@ table of content:
     g. (class) CurveSimilarity
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
+    b. (funcation) get_all_factors
 """
 
 
@@ -1130,6 +1136,25 @@ def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
                 tmp.extend(res)
                 solution_list.append(tmp)
     return solution_list
+
+
+def get_all_factors(n: int) -> list:
+    """
+    Return all factors of positive integer n.
+    :param n: A positive number
+    :return: a list which contains all factors of number n
+    """
+    cnt = collections.Counter()
+    for i in range(2, int(math.sqrt(n)) + 1):
+        while not n % i:
+            cnt[i] += 1
+            cnt[n // i] += 1
+            n //= i
+    if not cnt:
+        return sorted(list({1, n}))
+    factors = [[k ** vi for vi in range(v + 1)] for k, v in cnt.items()]
+    factors = sorted(list(set([functools.reduce(op.mul, r) for r in itertools.product(*factors)])))
+    return factors
 
 
 # Leon:
