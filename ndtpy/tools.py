@@ -822,7 +822,7 @@ class DataProcessing:
         if self.tds is not None:
             for i in range(self.tds.shape[0]):
                 ax[0].plot([self.tds[i] - self.bef for _ in range(np.shape(self.data)[1])],
-                           self.data[self.tds[i] - self.bef - self.avg, :], 'k.', markersize=10)
+                           self.data[self.tds[i] - self.bef, :], 'k.', markersize=10)
                 ax[0].plot([self.tds[i] + self.aft for _ in range(np.shape(self.data)[1])],
                            self.data[self.tds[i] + self.aft, :], 'k.', markersize=10)
         ax[0].set_title('rawdata')
