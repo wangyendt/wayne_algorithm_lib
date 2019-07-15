@@ -812,30 +812,35 @@ class DataProcessing:
 
     @func_timer
     def show_fig(self):
-        plt.rcParams['font.family'] = 'YouYuan'
+        plt.rcParams['font.family'] = 'FangSong'
         plt.rcParams['font.size'] = 16
         plt.rcParams['axes.unicode_minus'] = False
-        fig = plt.figure()
+        fig, ax = plt.subplots(2, 1, sharex='all')
         fig.set_size_inches(60, 10)
-        plt.subplot(211)
-        plt.plot(self.data)
-        plt.title('rawdata')
-        plt.legend(tuple([''.join(('rawdata', str(ii))) for ii in range(np.shape(self.data)[1])]))
-        plt.ylabel('ADC')
-        plt.subplot(212)
-        # plt.plot(self.force_signal, '-', linewidth=3)
-        plt.plot(self.energy)
+        ax[0].plot(self.data)
+        ax[0].plot(self.flag * (np.max(self.data) - np.min(self.data)) + np.min(self.data), '--')
+        if self.tds is not None:
+            for i in range(self.tds.shape[0]):
+                ax[0].plot([self.tds[i] - self.bef for _ in range(np.shape(self.data)[1])],
+                           self.data[self.tds[i] - self.bef - self.avg, :], 'k.', markersize=10)
+                ax[0].plot([self.tds[i] + self.aft for _ in range(np.shape(self.data)[1])],
+                           self.data[self.tds[i] + self.aft, :], 'k.', markersize=10)
+        ax[0].set_title('rawdata')
+        ax[0].legend(tuple([''.join(('rawdata ch', str(ii + 1))) for ii in range(np.shape(self.data)[1])]))
+        ax[0].set_ylabel('ADC')
+        ax[1].plot(self.energy)
         if len(self.energy_peak) > 0:
-            plt.plot(self.energy_peak[:, 0], self.energy_peak[:, 1], '.')
-        plt.plot(self.flag * (np.max(self.energy) - np.min(self.energy)) + np.min(self.energy), '--')
-        plt.hlines(self.energy_thd, 0, self.data.shape[0], linestyles='--')
-        plt.title(self.filename)
-        plt.xlabel('Time Series')
-        plt.ylabel('ADC')
+            ax[1].plot(self.energy_peak[:, 0], self.energy_peak[:, 1], '.', markersize=20)
+        ax[1].plot(self.flag * (np.max(self.energy) - np.min(self.energy)) + np.min(self.energy), '--')
+        ax[1].hlines(self.energy_thd, 0, self.data.shape[0], linestyles='--')
+        ax[1].hlines(self.energy_thd * self.energy_thd_decay_coef, 0, self.data.shape[0], linestyles='--')
+        ax[1].set_title(self.filename)
+        ax[1].set_xlabel('Time Series')
+        ax[1].set_ylabel('ADC')
         if len(self.energy_peak) > 0:
-            plt.legend(['energy', 'energy peak', 'touch flag', 'energy threshold'])
+            ax[1].legend(['energy', 'energy peak', 'touch flag', 'energy threshold'])
         else:
-            plt.legend(['energy', 'touch flag', 'energy threshold'])
+            ax[1].legend(['energy', 'touch flag', 'energy threshold'])
         plt.show()
 
     @func_timer
