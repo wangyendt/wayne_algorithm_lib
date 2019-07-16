@@ -657,6 +657,11 @@ class DataProcessing:
     Datetime: 2019/5/17 11:17
 
     example:
+    rawdata = np.vstack((
+        np.tile(rawdata[0], [200, 1]),
+        rawdata,
+        np.tile(rawdata[-1], [200, 1])
+    ))
     dp = DataProcessing(rawdata, f)
     dp.pre_process()
     dp.limiting_filter()
@@ -664,8 +669,8 @@ class DataProcessing:
     dp.baseline_removal()
     dp.calc_energy()
     dp.calc_flag()
-    dp.show_fig()
     dp.calc_force()
+    dp.show_fig()
     force = dp.force
     if not os.path.exists('result'):
         os.mkdir('result')
@@ -1149,17 +1154,8 @@ def get_all_factors(n: int) -> list:
     :param n: A positive number
     :return: a list which contains all factors of number n
     """
-    cnt = collections.Counter()
-    for i in range(2, int(math.sqrt(n)) + 1):
-        while not n % i:
-            cnt[i] += 1
-            cnt[n // i] += 1
-            n //= i
-    if not cnt:
-        return sorted(list({1, n}))
-    factors = [[k ** vi for vi in range(v + 1)] for k, v in cnt.items()]
-    factors = sorted(list(set([functools.reduce(op.mul, r) for r in itertools.product(*factors)])))
-    return factors
+    return list(set(reduce(
+        list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
 
 
 # Leon:
