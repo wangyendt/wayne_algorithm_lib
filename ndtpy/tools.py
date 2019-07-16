@@ -826,10 +826,13 @@ class DataProcessing:
         ax[0].plot(self.flag * (np.max(self.data) - np.min(self.data)) + np.min(self.data), '--')
         if self.tds is not None:
             for i in range(self.tds.shape[0]):
-                ax[0].plot([self.tds[i] - self.bef for _ in range(np.shape(self.data)[1])],
-                           self.data[self.tds[i] - self.bef, :], 'k.', markersize=10)
-                ax[0].plot([self.tds[i] + self.aft for _ in range(np.shape(self.data)[1])],
-                           self.data[self.tds[i] + self.aft, :], 'k.', markersize=10)
+                try:
+                    ax[0].plot([self.tds[i] - self.bef for _ in range(np.shape(self.data)[1])],
+                               self.data[self.tds[i] - self.bef, :], 'k.', markersize=10)
+                    ax[0].plot([self.tds[i] + self.aft for _ in range(np.shape(self.data)[1])],
+                               self.data[self.tds[i] + self.aft, :], 'k.', markersize=10)
+                except:
+                    continue
         ax[0].set_title('rawdata')
         ax[0].legend(tuple([''.join(('rawdata ch', str(ii + 1))) for ii in range(np.shape(self.data)[1])]))
         ax[0].set_ylabel('ADC')
