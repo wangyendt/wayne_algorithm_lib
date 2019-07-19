@@ -377,7 +377,7 @@ def butter_bandpass_filter(x, wn=0.2):
     )
 
 
-class FindLocalExtremeValue2:
+class FindLocalExtremeValue:
     """
     本类用于寻找局部极值
 
