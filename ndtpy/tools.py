@@ -2,7 +2,6 @@ import collections
 import ctypes
 import ctypes.wintypes
 import functools
-import functools
 import itertools
 import operator as op
 import os
@@ -41,7 +40,8 @@ table of content:
     g. (class) CurveSimilarity
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
-    b. (funcation) get_all_factors
+    b. (function) get_all_factors
+    c. (function) digit_counts
 """
 
 
@@ -377,7 +377,7 @@ def butter_bandpass_filter(x, wn=0.2):
     )
 
 
-class FindLocalExtremeValue:
+class FindLocalExtremeValue2:
     """
     本类用于寻找局部极值
 
@@ -388,18 +388,21 @@ class FindLocalExtremeValue:
     def __init__(self,
                  local_window=30,
                  min_valid_slp_thd=7,
-                 slp_step=3
+                 slp_step=3,
+                 max_update_num=4
                  ):
         """
         :param local_window: 表示寻找极值的窗长，仅寻找数据x中最后local_window
                             长度的数据相对于x最后一帧的极值。
         :param min_valid_slp_thd: 要成为合理的局部极值，至少要与被比较者相差的值
         :param slp_step: 找当前值和极值之间的最值斜率，斜率计算的步长
+        :param max_update_num: local peak连续max_update_num帧不更新则停止计算
         """
         self.local_window = local_window
         self.min_valid_slp_thd = min_valid_slp_thd
         self.min_slp_step = slp_step
         self.max_slp_step = slp_step
+        self.max_update_num = max_update_num
 
     def run(self, x: np.ndarray):
         """ 寻找局部极值
@@ -417,37 +420,30 @@ class FindLocalExtremeValue:
                 第一个local_diff是指x的最后一帧与局部极值之间值的差
                 第二个local_gap是指x的最后一帧与局部极值之间帧数的差
                 第三个min_slope是指x的最后一帧与局部极值之间，最小的斜率
-                第四个local_extreme_real_value是指局部极值实际的值
+                第四个max_slope是指x的最后一帧与局部极值之间，最大的斜率
+                第五个local_extreme_real_value是指局部极值实际的值
         """
 
-        assert self.local_window + 2 <= x.shape[0] and x.shape[0] >= 4
         x = x.astype(np.float)
-        m = len(x)
+        m = x.shape[0]
+        assert m >= max(self.local_window + 2, 4)
 
         local_diff, local_gap, min_slope, max_slope, local_extreme_real_value = 0, 0, np.inf, -np.inf, 0
         local_x = 0
         update_num = 0
-        queue = []
+        diff_queue = collections.deque(maxlen=3)
+        diff_queue.append(x[-1] - x[-2])
+        diff_queue.append(x[-1] - x[-3])
+        slope_queue = collections.deque()
         for j in range(1, self.local_window):
             if j + 2 * self.min_slp_step <= m:
-                min_slope = np.min((
-                    min_slope,
-                    (x[-j - self.min_slp_step:-j].mean() -
-                     x[-j - 2 * self.min_slp_step:-j - self.min_slp_step].mean()
-                     ) / self.min_slp_step
-                ))
-                max_slope = np.max((
-                    max_slope,
-                    (x[-j - self.max_slp_step:-j].mean() -
-                     x[-j - 2 * self.max_slp_step:-j - self.max_slp_step].mean()
-                     ) / self.max_slp_step
-                ))
-            if not queue:
-                queue = [x[-1] - x[-2], x[-1] - x[-3], x[-1] - x[-4]]  # init
-            else:
-                queue.pop(0)
-                queue.append(x[-1] - x[-1 - j - 2])
-            a, b, c = queue
+                slope_right = sum(x[-j - self.min_slp_step:-j]) if j <= self.min_slp_step else slope_queue.popleft()
+                slope_left = sum(x[-j - 2 * self.min_slp_step:-j - self.min_slp_step])
+                slope_queue.append(slope_left)
+                cur_slope = slope_right - slope_left
+                min_slope, max_slope = min(min_slope, cur_slope), max(max_slope, cur_slope)
+            diff_queue.append(x[-1] - x[-1 - j - 2])
+            a, b, c = diff_queue
             if 0 == local_x:
                 if max(abs(a), abs(b), abs(c)) > self.min_valid_slp_thd:
                     local_x = a
@@ -461,10 +457,12 @@ class FindLocalExtremeValue:
                 local_extreme_real_value = x[-1 - j]
             else:
                 update_num += 1
-            if update_num > 4:
+            if update_num > self.max_update_num:
                 break
         local_diff = local_x
-        return local_diff, local_gap, min_slope, max_slope, local_extreme_real_value
+        return (local_diff, local_gap,
+                min_slope / self.min_slp_step ** 2, max_slope / self.min_slp_step ** 2,
+                local_extreme_real_value)
 
 
 class LoadData:
@@ -1154,11 +1152,44 @@ def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
 def get_all_factors(n: int) -> list:
     """
     Return all factors of positive integer n.
+
+    Author:   wangye
+    Datetime: 2019/7/16 16:00
+
     :param n: A positive number
     :return: a list which contains all factors of number n
     """
     return list(set(reduce(
         list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
+
+
+def digitCount(n, k):
+    """
+    Count the number of occurrences of digit k from 1 to n.
+    Author:   wangye
+    Datetime: 2019/7/18 14:49
+
+    :param n:
+    :param k:
+    :return: The count.
+    """
+    N, ret, dig = n, 0, 1
+    while n >= 1:
+        m, r = divmod(n, 10)
+        if r > k:
+            ret += (m + 1) * dig
+        elif r < k:
+            ret += m * dig
+        elif r == k:
+            ret += m * dig + (N - n * dig + 1)
+        n //= 10
+        dig *= 10
+    if k == 0:
+        if N == 0:
+            return 1
+        else:
+            return ret - dig // 10
+    return ret
 
 
 # Leon:
