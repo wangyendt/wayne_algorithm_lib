@@ -38,6 +38,7 @@ table of content:
     e. (class) DataProcessing
     f. (class) ExtractRollingData
     g. (class) CurveSimilarity
+    h. (function) find_extreme_value_in_sliding_window
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
     b. (function) get_all_factors
@@ -1122,6 +1123,28 @@ class CurveSimilarity:
             return np.squeeze([
                 np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
             ])
+
+
+def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
+    """
+    寻找一段数据中每个窗长范围内的最值，时间复杂度O(n)
+    :param data: 数据 
+    :param k: 窗长
+    :return: 包含每个窗长最值的列表
+    """
+    minQueue = collections.deque()
+    maxQueue = collections.deque()
+    retMin, retMax = [], []
+    for i, n in enumerate(data):
+        while minQueue and n < data[minQueue[-1]]: minQueue.pop()
+        while maxQueue and n > data[maxQueue[-1]]: maxQueue.pop()
+        minQueue.append(i)
+        maxQueue.append(i)
+        if i - minQueue[0] >= k: minQueue.popleft()
+        if i - maxQueue[0] >= k: maxQueue.popleft()
+        if i >= k - 1: retMin.append(data[minQueue[0]])
+        if i >= k - 1: retMax.append(data[maxQueue[0]])
+    return retMin, retMax
 
 
 def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
