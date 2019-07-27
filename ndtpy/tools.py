@@ -11,6 +11,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pygame
 import scipy as sp
 import win32api
 import win32clipboard
@@ -18,6 +19,7 @@ import win32con
 import win32con
 import win32gui
 import win32process
+from PIL import Image
 from pykeyboard import PyKeyboard
 from pymouse import PyMouse
 from scipy import signal
