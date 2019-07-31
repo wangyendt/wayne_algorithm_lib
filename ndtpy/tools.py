@@ -3,28 +3,56 @@ import ctypes
 import ctypes.wintypes
 import functools
 import itertools
+import logging
 import operator as op
 import os
+import re
+import sys
 import time
+import traceback
+import warnings
+import xml.etree.ElementTree as ET
 
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pygame
+
+try:
+    import pygame
+except ImportError:
+    logging.warn('Try pip install pygame')
 import scipy as sp
-import win32api
-import win32clipboard
-import win32con
-import win32con
-import win32gui
-import win32process
-from PIL import Image
-from pykeyboard import PyKeyboard
-from pymouse import PyMouse
+
+try:
+    import win32api
+    import win32clipboard
+    import win32con
+    import win32gui
+    import win32process
+except ImportError:
+    logging.warn('Try install pywin32 on your computer')
+
+try:
+    from PIL import Image
+except ImportError:
+    logging.warn('Try pip install Pillow')
+
+try:
+    from PyQt5.QtCore import *
+    from PyQt5.QtGui import *
+    from PyQt5.QtWidgets import *
+except ImportError:
+    logging.warn('Try pip install pyqt5-tools')
+
+try:
+    from pykeyboard import PyKeyboard
+    from pymouse import PyMouse
+except ImportError:
+    logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer')
+
 from scipy import signal
 
-# Wayne:
 """
 table of content:
 1. Useful tools:
@@ -36,17 +64,21 @@ table of content:
     a. (function) peak_det
     b. (function) butter_bandpass_filter
     c. (class) FindLocalExtremeValue
-    d. (class) LoadData
-    e. (class) DataProcessing
-    f. (class) ExtractRollingData
-    g. (class) CurveSimilarity
-    h. (function) find_extreme_value_in_sliding_window
+    d. (class) DataProcessing
+    e. (class) ExtractRollingData
+    f. (class) CurveSimilarity
+    g. (function) find_extreme_value_in_sliding_window
 3. mathematics:
     a. (function) find_all_non_negative_integer_solutions
     b. (function) get_all_factors
     c. (function) digit_counts
+4. DataStructure:
+    a. (class) ConditionTree
+    b. (class) XmlIO
 """
 
+
+# Wayne:
 
 def func_timer(func):
     @functools.wraps(func)
@@ -466,188 +498,6 @@ class FindLocalExtremeValue:
         return (local_diff, local_gap,
                 min_slope / self.min_slp_step ** 2, max_slope / self.min_slp_step ** 2,
                 local_extreme_real_value)
-
-
-class LoadData:
-    """
-    用于加载数据到内存
-    Author:   wangye
-    Datetime: 2019/4/23 17:17
-    """
-
-    def __init__(self,
-                 channel_num: int,
-                 begin_ind_dic: dict,
-                 data_type: str
-                 ):
-        """
-
-        :param channel_num: 通道数
-        :param begin_ind_dic: 数据起始位置字典, 关键字为:
-                                    rawdata, baseline, forcesig,
-                                    forceflag, humanflag, stableflag
-                                    temperature, fwversion
-        :param data_type: 传入数据的类型, 'slice' 或 'normal'
-        """
-        self.channel_num = channel_num
-        self.data_type = data_type
-        if self.data_type == 'slice':
-            if not begin_ind_dic:
-                begin_ind_dic = {
-                    'rawdata': 0,
-                    'baseline': channel_num,
-                    'forcesig': 2 * channel_num,
-                    'forceflag': 3 * channel_num,
-                    'humanflag': 3 * channel_num + 1
-                }
-            self.humanflag_column = begin_ind_dic['humanflag']
-        elif self.data_type == 'normal':
-            if not begin_ind_dic:
-                begin_ind_dic = {
-                    'rawdata': 28,
-                    'baseline': 34,
-                    'forcesig': 40,
-                    'forceflag': 1,
-                    'stableflag': 4,
-                    'temperature': 8,
-                    'fwversion': 26
-                }
-            self.stable_flag_range = range(begin_ind_dic['stableflag'],
-                                           begin_ind_dic['stableflag'] + channel_num)
-            self.temperature_column = begin_ind_dic['temperature']
-            self.fw_version = begin_ind_dic['fwversion']
-        self.rawdata_range = range(begin_ind_dic['rawdata'],
-                                   begin_ind_dic['rawdata'] + channel_num)
-        self.baseline_range = range(begin_ind_dic['baseline'],
-                                    begin_ind_dic['baseline'] + channel_num)
-        self.forcesig_range = range(begin_ind_dic['forcesig'],
-                                    begin_ind_dic['forcesig'] + channel_num)
-        self.forceflag_column = begin_ind_dic['forceflag']
-
-    def load_data(self, path):
-        """
-        Load Data 入口
-        :param path: 文件路径
-        :return:
-        """
-        if self.data_type == 'slice':
-            return self.__load_data_from_slices__(path)
-        elif self.data_type == 'normal':
-            return self.__load_data_normal__(path)
-
-    def __load_data_from_slices__(self, path):
-        """
-        From slices
-        :param path:
-        :return:
-        """
-        with open(path, 'r', encoding='utf-8') as f:
-            data = np.int64(pd.read_table(f))
-        rawdata = data[:, self.rawdata_range]
-        baseline = data[:, self.baseline_range]
-        forcesig = data[:, self.forcesig_range]
-        forceflag = data[:, self.forceflag_column]
-        forceflagnew = data[:, self.humanflag_column]
-
-        for ch in range(self.channel_num):
-            index = np.argmax((rawdata[:, ch] - baseline[:, ch]))
-            total_calibration_coeff = forcesig[index, ch] / (rawdata[index, ch] - baseline[index, ch])
-            rawdata[:, ch] = rawdata[:, ch] * total_calibration_coeff
-            baseline[:, ch] = baseline[:, ch] * total_calibration_coeff
-
-        temperature_err_flag = np.ones_like(data[:, 0])
-        sig_err_flag = np.zeros_like(data[:, 0])
-        return data, rawdata, baseline, forceflag, forcesig, forceflagnew, temperature_err_flag, sig_err_flag
-
-    def __load_data_only_data__(self, path):
-        with open(path, 'r', encoding='utf-8') as f:
-            data = np.int64(pd.read_csv(f, header=None, skiprows=1, delimiter='\t').iloc[:, 1:-1])
-        return data
-
-    def __load_data_normal__(self, path):
-        """
-        From firmware
-        :param path:
-        :return:
-        """
-        data = self.__load_data_only_data__(path)
-
-        fw_version = data[:, self.fw_version]
-        print('固件版本号: {}'.format(fw_version[0]))
-
-        forceflag = data[:, self.forceflag_column] % 2
-        rawdata = data[:, self.rawdata_range]
-        baseline = data[:, self.baseline_range]
-        forcesig = data[:, self.forcesig_range]
-        stable_state = data[:, self.stable_flag_range]
-
-        temperature = data[:, self.temperature_column] / 100
-        temperature_err_flag = temperature > 30
-        rawdata, baseline = self.__rawdata_baseline_calibration__(rawdata, forcesig, baseline, temperature,
-                                                                  method=2)
-        sig_err_flag = np.zeros_like(forceflag)
-        return data, rawdata, baseline, forceflag, forcesig, temperature_err_flag, sig_err_flag, stable_state
-
-    def __rawdata_baseline_calibration__(self, rawdata, forcesig, baseline, temperature, method=2):
-        if method == 1:  # 对 rawdata,baseline 逐帧计算系数
-            calibration_coeff = self.__temperature_calibration__(rawdata, forcesig, baseline, temperature)
-            rawdata = rawdata * calibration_coeff
-            baseline = baseline * calibration_coeff
-        elif method == 2:  # 都使用forcesig最大帧系数
-            for ch in range(forcesig.shape[1]):
-                index = np.argmax((rawdata[:, ch] - baseline[:, ch]))
-                total_calibration_coeff = forcesig[index, ch] / (rawdata[index, ch] - baseline[index, ch])
-                rawdata[:, ch] = rawdata[:, ch] * total_calibration_coeff
-                baseline[:, ch] = baseline[:, ch] * total_calibration_coeff
-        else:  # 对 rawdata 逐帧计算系数, 对baseline 使用forcesig最大帧系数
-            calibration_coeff = self.__temperature_calibration__(rawdata, forcesig, baseline, temperature)
-            for ch in range(forcesig.shape[1]):
-                index = np.argmax((rawdata[:, ch] - baseline[:, ch]))
-                total_calibration_coeff = forcesig[index, ch] / (rawdata[index, ch] - baseline[index, ch])
-                baseline[:, ch] = baseline[:, ch] * total_calibration_coeff
-            rawdata = rawdata * calibration_coeff
-        return rawdata, baseline
-
-    def __temperature_calibration__(self, rawdata, forcesig, baseline, temperature):
-        temperatures = [-20.0, -10.0, 0.0, 10.0, 20.0, 25.0, 30.0, 40.0, 50.0]
-        values = [[0.528, 0.574, 0.620, 0.633, 0.486, 0.329],
-                  [0.594, 0.676, 0.700, 0.636, 0.517, 0.424],
-                  [0.677, 0.771, 0.775, 0.680, 0.588, 0.548],
-                  [0.783, 0.859, 0.852, 0.766, 0.708, 0.707],
-                  [0.919, 0.947, 0.942, 0.905, 0.889, 0.897],
-                  [1.000, 1.000, 1.000, 1.000, 1.000, 1.000],
-                  [1.092, 1.065, 1.073, 1.114, 1.115, 1.104],
-                  [1.309, 1.271, 1.305, 1.400, 1.276, 1.298],
-                  [1.573, 1.757, 1.838, 1.712, 1.186, 1.450]]
-
-        def get_relative_coeff(t0, ch):
-            if t0 <= temperatures[0]:
-                return values[0][ch]
-            elif t0 >= temperatures[-1]:
-                return values[-1][ch]
-            for (ti, t) in enumerate(temperatures):
-                if ti == len(temperatures) - 1:
-                    break
-                if temperatures[ti] <= t0 < temperatures[ti + 1]:
-                    c1, c2 = values[ti][ch], values[ti + 1][ch]
-                    t1, t2 = temperatures[ti], temperatures[ti + 1]
-                    return c1 * c2 * (t2 - t1) / (c1 * (t0 - t1) + c2 * (t2 - t0))
-
-        max_forcesig_relative_coeff = np.array([0.0] * self.channel_num, dtype=np.float32)
-        for ch in range(forcesig.shape[1]):
-            index = np.argmax((rawdata[:, ch] - baseline[:, ch]))
-            calibration_coeff = forcesig[index, ch] / (rawdata[index, ch] - baseline[index, ch])
-            max_forcesig_relative_coeff[ch] = calibration_coeff / get_relative_coeff(temperature[index], ch)
-            if ch == 0:
-                print(max_forcesig_relative_coeff[0], index, get_relative_coeff(temperature[index], ch),
-                      calibration_coeff,
-                      temperature[index])
-        coeffs = np.ones_like(rawdata, dtype=np.float32)
-        for i in range(rawdata.shape[0]):
-            temperaturei = temperature[i]
-            for ch in range(rawdata.shape[1]):
-                coeffs[i][ch] = max_forcesig_relative_coeff[ch] * get_relative_coeff(temperaturei, ch)
-        return coeffs
 
 
 class DataProcessing:
@@ -1217,7 +1067,260 @@ def digitCount(n, k):
     return ret
 
 
+class ConditionTree:
+    """
+    逻辑条件树，用来存储逻辑关系的树
+
+    Author:   wangye
+    Datetime: 2019/7/31 16:17
+    """
+
+    def __init__(self, val: str):
+        self.val = val
+        self.children = []
+        self.kvp = dict()
+
+    def append_by_path(self, path: list):
+        """
+        从路径导入
+        :param path:
+        :return:
+        """
+        if not path: return
+        p = path[0]
+        if isinstance(p, dict):
+            self.kvp.update(p)
+        else:
+            for ch in self.children:
+                if p == ch.val:
+                    ch.append_by_path(path[1:])
+                    return
+            self.children.append(ConditionTree(p))
+            self.children[-1].append_by_path(path[1:])
+
+    def find(self, nick_name: str) -> 'ConditionTree':
+        if not self.children: return None
+        for ch in self.children:
+            if ch.val == nick_name:
+                return ch
+            res = ch.find(nick_name)
+            if res: return res
+        return None
+
+    def find_by_path(self, path: list) -> 'ConditionTree':
+        cur = self
+        while path:
+            p = path.pop(0)
+            for ch in cur.children:
+                if p == ch.val:
+                    cur = ch
+                    if not path:
+                        return cur
+                    break
+            else:
+                return None
+
+    def print(self):
+        def helper(_tree):
+            if not _tree: return []
+            if not _tree.children and _tree.kvp:
+                return [[_tree.val + ' -> ' + kvp[0] + ': ' + kvp[1]] for kvp in _tree.kvp.items()]
+            return [[_tree.val] + res for ch in _tree.children for res in helper(ch)]
+
+        print('-*-*-*-*-*-*-start print tree-*-*-*-*-*-*-')
+        [print(' -> '.join(h)) for h in helper(self)]
+        print('-*-*-*-*-*-*-end print tree-*-*-*-*-*-*-')
+
+    @staticmethod
+    def load_rule_excel(filename):
+        rules = pd.read_excel(filename)
+        rules = rules.fillna(method='pad')
+        root = ConditionTree('st_alg_rule')
+        for i in range(len(rules)):
+            ru = rules.iloc[i]
+            k, v = ru.pop('bit'), ru.pop('detail')
+            path = tuple(list(ru) + [{'bit' + str(k): v}])
+            root.append_by_path(path)
+        return root
+
+    @staticmethod
+    def example1():
+        root = ConditionTree('st_alg_rule')
+        root.children = [
+            ConditionTree('forceflag'),
+            ConditionTree('baseline'),
+            ConditionTree('touchflag'),
+            ConditionTree('positiondetect'),
+            ConditionTree('buttondetect')
+        ]
+
+        root.find('forceflag').children = [
+            ConditionTree('group0'),
+        ]
+
+        root.find('group0').children = [
+            ConditionTree('ff_rel_key'),
+            ConditionTree('ff_pos_tri'),
+            ConditionTree('ff_neg_tri'),
+            ConditionTree('ff_neg_rel'),
+            ConditionTree('ff_pos_rel')
+        ]
+        root.find('ff_rel_key').kvp = {
+            'bit0': '负force flag离手',
+            'bit1': '正force flag离手',
+            'bit2': '敲击事件',
+            'bit3': 'timeout',
+            'bit8': 'timeout后负信号归零',
+            'bit9': '单个通道极大'
+        }
+
+        root.find('ff_pos_tri').kvp = {
+            'bit0': '(0 == (st_fv.err_state[group] & FORCE_ERR_MASK))',
+            'bit1': '(st_fv.force_val[max_ch] > thr_coeff * FF_TRI_TH)',
+            'bit2': '(slpTmp > thr_coeff * FF_SLP_TH1)',
+            'bit3': '(slpTmp2 > thr_coeff * FF_SLP_TH2)',
+            'bit4': '(st_fv.force_local[max_ch] < -thr_coeff * FF_LOCAL_TH)',
+            'bit5': '满足历史基线条件'
+        }
+
+        root.find('ff_neg_tri').kvp = {
+            'bit0': '(0 == (st_fv.err_state[group] & FORCE_ERR_MASK))',
+            'bit1': '(st_fv.force_val[max_ch] < -thr_coeff * FF_TRI_TH)',
+            'bit2': '(slpTmp < -thr_coeff * FF_SLP_TH1)',
+            'bit3': '(slpTmp2 < -thr_coeff * FF_SLP_TH2)',
+            'bit4': '(st_fv.force_local[max_ch] < -thr_coeff * FF_LOCAL_TH)',
+            'bit5': '(st_ff.rel_cnt[group] > 50)',
+            'bit6': '(~st_fv.err_state[0] & FORCE_ERR_STATE_HIGH_TEMP)'
+        }
+
+        root.find('ff_neg_rel').kvp = {
+            'bit0': '(st_fv.force_val[max_ch] > ff_leave_coeff * st_fv.force_valley[max_ch])',
+            'bit1': '(st_fv.force_val[max_ch] > -FF_REL_TH)'
+        }
+
+        root.find('ff_pos_rel').kvp = {
+            'bit0': '(st_fv.force_val[max_ch] < ff_leave_coeff * st_fv.force_peak[max_ch])',
+            'bit1': '(st_fv.force_val[max_ch] < FF_REL_TH)'
+        }
+
+        root.print()
+        print(root.find('ff_pos_rel').val)
+        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
+
+    @staticmethod
+    def example2():
+        root = ConditionTree('st_alg_rule')
+        for path in [
+            ('forceflag', 'group0', 'ff_rel_key', {'bit0': '负force flag离手'}),
+            ('forceflag', 'group0', 'ff_rel_key', {'bit1': '正force flag离手'}),
+            ('forceflag', 'group0', 'ff_rel_key', {'bit2': '敲击事件'}),
+            ('forceflag', 'group0', 'ff_rel_key', {'bit3': 'timeout'}),
+            ('forceflag', 'group0', 'ff_rel_key', {'bit8': 'timeout后负信号归零'}),
+            ('forceflag', 'group0', 'ff_rel_key', {'bit9': '单个通道极大'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit0': '(0 == (st_fv.err_state(group) & FORCE_ERR_MASK))'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit1': '(st_fv.force_val(max_ch) > thr_coeff * FF_TRI_TH)'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit2': '(slpTmp > thr_coeff * FF_SLP_TH1)'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit3': '(slpTmp2 > thr_coeff * FF_SLP_TH2)'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit4': '(st_fv.force_local(max_ch) < -thr_coeff * FF_LOCAL_TH)'}),
+            ('forceflag', 'group0', 'ff_pos_tri', {'bit5': '满足历史基线条件'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit0': '(0 == (st_fv.err_state(group) & FORCE_ERR_MASK))'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit1': '(st_fv.force_val(max_ch) < -thr_coeff * FF_TRI_TH)'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit2': '(slpTmp < -thr_coeff * FF_SLP_TH1)'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit3': '(slpTmp2 < -thr_coeff * FF_SLP_TH2)'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit4': '(st_fv.force_local(max_ch) < -thr_coeff * FF_LOCAL_TH)'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit5': '(st_ff.rel_cnt(group) > 50)'}),
+            ('forceflag', 'group0', 'ff_neg_tri', {'bit6': '(~st_fv.err_state(0) & FORCE_ERR_STATE_HIGH_TEMP)'}),
+            ('forceflag', 'group0', 'ff_neg_rel', {'bit0':
+                                                       '(st_fv.force_val(max_ch) > ff_leave_coeff * st_fv.force_valley(max_ch))'}),
+            ('forceflag', 'group0', 'ff_neg_rel', {'bit1': '(st_fv.force_val(max_ch) > -FF_REL_TH)'}),
+            ('forceflag', 'group0', 'ff_pos_rel', {'bit0':
+                                                       '(st_fv.force_val(max_ch) < ff_leave_coeff * st_fv.force_peak(max_ch))'}),
+            ('forceflag', 'group0', 'ff_pos_rel', {'bit1': '(st_fv.force_val(max_ch) < FF_REL_TH)'}),
+        ]:
+            root.append_by_path(path)
+        root.print()
+        print(root.find('ff_pos_rel').val)
+        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
+
+    @staticmethod
+    def example3():
+        with open('_proj_name.txt', 'r') as f:
+            proj = f.readline()
+        rules = pd.read_excel(proj + '_logic_rule.xlsx')
+        rules = rules.fillna(method='pad')
+        root = ConditionTree('st_alg_rule')
+        for i in range(len(rules)):
+            ru = rules.iloc[i]
+            k, v = ru.pop('bit'), ru.pop('detail')
+            path = tuple(list(ru) + [{'bit' + str(k): v}])
+            root.append_by_path(path)
+        root.print()
+        print(root.find('ff_pos_rel').val)
+        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
+
+
+class XmlIO:
+    """
+    用于xml文件的读取，返回ConditionTree数据结构
+
+    Author:   wangye
+    Datetime: 2019/7/31 16:24
+    """
+
+    def __init__(self, file_read='', file_write=''):
+        self.file_read = file_read
+        self.file_write = file_write
+
+    def read(self) -> ConditionTree:
+        tree = ET.parse(self.file_read)
+        root = tree.getroot()
+
+        def helper(_tree: ET.Element, _is_root=True):
+            if not _tree: return [[{_tree.tag: _tree.text.replace('\t', '').replace('\n', '')}]]
+            text = [] if _is_root else [_tree.tag.replace('\t', '').replace('\n', '')]
+            return [text + res for ch in _tree for res in helper(ch, False)]
+
+        c_tree = ConditionTree(root.tag)
+        [c_tree.append_by_path(p) for p in helper(root)]
+        # c_tree.print()
+        return c_tree
+
+    def write(self, root_name, tree: ConditionTree):
+        _tree = ET.ElementTree()
+        _root = ET.Element(root_name)
+        _tree._setroot(_root)
+
+        def helper(etree, c_tree):
+            if not c_tree.children and c_tree.kvp:
+                for k, v in c_tree.kvp.items():
+                    ET.SubElement(etree, k).text = v
+            else:
+                for ch in c_tree.children:
+                    son = ET.SubElement(etree, ch.val)
+                    helper(son, ch)
+
+        helper(_root, tree)
+        self._indent(_root)
+        _tree.write(self.file_write, 'utf-8', True)
+
+    def _indent(self, elem, level=0):
+        i = "\n" + level * "\t"
+        if len(elem):
+            if not elem.text or not elem.text.strip():
+                elem.text = i + "\t"
+            if not elem.tail or not elem.tail.strip():
+                elem.tail = i
+            for elem in elem:
+                self._indent(elem, level + 1)
+            if not elem.tail or not elem.tail.strip():
+                elem.tail = i
+        else:
+            if level and (not elem.tail or not elem.tail.strip()):
+                elem.tail = i
+
+
 # Leon:
+
 class DataMark:
     """
     对数据进行手工标记，拆分数据成数据集
@@ -1397,3 +1500,455 @@ class DataMark:
             self.fig.canvas.mpl_connect('button_press_event', self.onclick)
 
             plt.show()
+
+
+# Shine
+
+class GeneratePrivateModel:
+    """
+    根据校准点数据和公共模板，生成私有模板
+
+    Author:   shinelin
+    Datetime: 2019/7/29 14:29
+
+    校准点规模为1 X Chanels，公共模板规模为 points X Chanels
+    example:
+        MODEL = generate_private_model(data, model)
+        pri_model, model, X, P = MODEL.generate_model('app22')
+        其中pri_model是私有模板,P为处理后的校准点数据，X为P的横坐标,model是处理后的公共模板
+        实参'app22','app32'为逼近型方法，’int42','int33'为插值型方法，不指定时默认为'int42'
+        在目录下会生成存有私有模板数据的文本，private_model.txt
+    """
+
+    def __init__(self, data, model):
+        self.data = data
+        self.model = model
+        self.iterations = 9
+        self.ways = 'int42'
+        # 拟合型app22,app32
+        # 逼近型int42,int33
+
+    def model_process(self):
+        # 剔除首末小于50%的顶点
+        for num_point in range(0, self.model.shape[0]):
+            if self.model[num_point, 0] >= np.max(self.model[num_point, 0]) / 2:
+                [model0, self.model] = np.split(self.model, [num_point], axis=0)
+                break
+        for num_point in range(0, self.model.shape[0])[::-1]:
+            if self.model[num_point, self.model.shape[1] - 1] >= np.max(
+                    self.model[num_point, self.model.shape[1] - 1]) / 2:
+                [self.model, model1] = np.split(self.model, [num_point + 1], axis=0)
+                break
+        return self.model
+
+    def subdivision(self, P, X):
+        if self.ways == 'app22':
+            a, mpoint, pnary, pnary_a, sub_type = 1 / 4, 2, 2, 0, 'dual'
+        elif self.ways == 'app32':
+            a, mpoint, pnary, pnary_a, sub_type = 1 / 8, 3, 2, 1, 'basic'
+        elif self.ways == 'int42':
+            a, mpoint, pnary, pnary_a, sub_type = 1 / 16, 4, 2, 1, 'basic'
+        elif self.ways == 'int33':
+            b = 5 / 18
+            a, mpoint, pnary, pnary_a, sub_type = b - 1 / 3, 3, 3, 0, 'dual'
+        s = (mpoint * pnary - 1 - pnary_a) // (pnary - 1)
+        # 扩充虚拟点
+        if sub_type == 'dual':
+            n_v = (s - 3) // 2 if self.ways.find('int') >= 0 else (s - 3) // 2 + 1
+        else:
+            n_v = (s - 2) // 2 if s % 2 == 0 else (s - 1) // 2
+            n_v = n_v + 0 if self.ways.find('int') >= 0 else n_v + 1
+        py = 0
+        while py < n_v:
+            P = np.vstack([P[0, :], P, P[-1, :]])
+            X = np.hstack([X[0], X, X[-1]])
+            py += 1
+        print('延拓虚拟点数：' + str(n_v * 2) + '\n' + '延拓后初始点数：' + str(X.size))
+        print('延拓后横坐标点集合：')
+        print(X)
+        print('细分方法：' + self.ways + '\n' + '细分次数k=' + str(self.iterations))
+        while self.iterations > 0:
+            P_new = np.zeros([(P.shape[0] - mpoint + 1) * pnary + pnary_a, P.shape[1]])
+            X_new = np.zeros((X.shape[0] - mpoint + 1) * pnary + pnary_a)
+            if self.ways == 'app22':
+                for i in range(0, P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = (1 - a) * P[i, :] + a * P[i + 1, :]
+                    P_new[2 * i + 1, :] = a * P[i, :] + (1 - a) * P[i + 1, :]
+                    X_new[2 * i] = (1 - a) * X[i] + a * X[i + 1]
+                    X_new[2 * i + 1] = a * X[i] + (1 - a) * X[i + 1]
+            elif self.ways == 'app32':
+                for i in range(0, P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = P[i, :] / 2 + P[i + 1, :] / 2
+                    P_new[2 * i + 1, :] = a * P[i, :] + (1 - 2 * a) * P[i + 1, :] + a * P[i + 2, :]
+                    X_new[2 * i] = X[i] / 2 + X[i + 1] / 2
+                    X_new[2 * i + 1] = a * X[i] + (1 - 2 * a) * X[i + 1] + a * X[i + 2]
+            elif self.ways == 'int42':
+                for i in np.arange(0, P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = P[i + 1, :]
+                    X_new[2 * i] = X[i + 1]
+                    P_new[2 * i + 1, :] = -a * P[i, :] + \
+                                          (1 / 2 + a) * P[i + 1, :] + \
+                                          (1 / 2 + a) * P[i + 2, :] - a * P[i + 3, :]
+                    X_new[2 * i + 1] = -a * X[i] + (1 / 2 + a) * X[i + 1] + (1 / 2 + a) * X[i + 2] - a * X[i + 3]
+            elif self.ways == 'int33':
+                for i in np.arange(0, P.shape[0] - mpoint + 1):
+                    P_new[3 * i, :] = b * P[i, :] + (1 - b - a) * P[i + 1, :] + a * P[i + 2, :]
+                    X_new[3 * i] = b * X[i] + (1 - b - a) * X[i + 1] + a * X[i + 2]
+                    P_new[3 * i + 1, :] = P[i + 1, :]
+                    X_new[3 * i + 1] = X[i + 1]
+                    P_new[3 * i + 2, :] = a * P[i, :] + (1 - b - a) * P[i + 1, :] + b * P[i + 2, :]
+                    X_new[3 * i + 2] = a * X[i] + (1 - b - a) * X[i + 1] + b * X[i + 2]
+            if self.ways == 'int42':
+                i += 1
+                P_new[2 * i, :] = P[i + 1, :]
+                X_new[2 * i] = X[i + 1]
+            elif self.ways == 'app32':
+                i += 1
+                P_new[2 * i, :] = P[i, :] / 2 + P[i + 1, :] / 2
+                X_new[2 * i] = X[i] / 2 + X[i + 1] / 2
+            # 拟合型方法需要通过归一输出
+            if self.ways.find('app') >= 0:
+                for ch in range(0, P_new.shape[1]):
+                    P_new[:, ch] = P_new[:, ch] / np.max(np.max(P_new[:, ch])) * 1024
+            P = P_new
+            X = X_new
+            self.iterations = self.iterations - 1
+        return X_new, P_new
+
+    def find_axis(self, P, X, model_x):
+        pri_model_x = np.zeros_like(model_x)
+        pri_model = np.zeros([pri_model_x.shape[0], P.shape[1]])
+        for i in np.arange(model_x.shape[0]):
+            pri_model_x[i] = np.argmin(abs(X - model_x[i]))
+            pri_model[i] = P[pri_model_x[i], :]
+        return pri_model
+
+    def generate_model(self, ways='int42', iterations=9):
+        self.iterations = iterations
+        self.ways = ways
+        for ch in range(0, self.model.shape[1]):
+            self.model[:, ch] = self.model[:, ch] / np.max(np.max(self.model[:, ch])) * 1024
+        # 剔除首末小于50%的顶点
+        self.model = self.model_process()
+        self.model = butter_bandpass_filter(self.model)
+        model_x = np.arange(0, self.model.shape[0])
+
+        data_X = np.arange(0, self.data.shape[0])
+        for ch in range(0, self.model.shape[1]):
+            self.data[:, ch] = self.data[:, ch] / np.max(np.max(self.data[:, ch])) * 1024
+            data_X[ch] = self.model[:, ch].argmax()
+        # P和X首尾增加model的首尾点
+        P = self.data
+        X = data_X
+        # data_begin = self.model[0, :] + P[0, :] - self.model[X[0], :]
+        # data_end = self.model[-1, :] + P[-1, :] - self.model[X[-1], :]
+        # P = np.vstack([data_begin, P, data_end])
+        P = np.vstack([self.model[0, :], P, self.model[-1, :]])
+        X = np.hstack([model_x[0], X, model_x[-1]])
+        (X_new, P_new) = self.subdivision(P, X)
+        pri_model = self.find_axis(P_new, X_new, model_x)
+        np.savetxt('private_model.txt', pri_model, '%d')
+        return pri_model, self.model, X, P
+
+
+# Carry
+
+class ExtractDotData:
+    """
+    提取数据
+
+    Carry Chenli
+
+    example:
+    edd = ExtractDotData()
+    folder = r'E:\Projects\PT101\密集打点数据\20190730_#2vs#4'
+    save_folder = 'template\\deleteme_rightnow'
+    if not os.path.exists(folder):
+        os.makedirs(path=folder)
+    files = list_all_files(folder, ['', '.txt'], ['finger'])
+    for fid, file in enumerate(files):
+        with open(file, 'r', encoding='utf-8') as f:
+            data = np.array(pd.read_csv(f, header=None, skiprows=2, delimiter='\t'))
+            f.close()
+        rawdata = data[:, 2:9]
+        edd(rawdata, save_folder + '\\' + str(fid) + '.txt')
+
+    files = list_all_files(save_folder, ['.txt'])
+    edd.generate_mean_template(files, template_len=None)
+    """
+    if True:  # 默认参数
+        plt.rcParams['font.family'] = 'FangSong'
+        plt.rcParams['axes.unicode_minus'] = False
+        _markers = ('o', 's', 'p', '*', '+', '<', '>', '^')
+        _colors = ('blue', 'green', 'red', 'orange', 'gray', 'yellow', 'pink', 'black')
+
+        # baseline tracking
+        _alpha = 0.001
+        _limit = 5
+        # force flag
+        _trigger_th = 20
+        _slope_th = 0
+        _leave_ratio_th = 0.1
+        _leave_cnt_th = 50
+        _touch_cnt_th = 50
+        # a better setting for PT101
+        # base_index = [-150, -50]
+        # data_index = [100, 200]
+        # chose_index = [10, 90]
+        # sig extract -- from Dragon Long's APK
+        _base_index = (-90, -50)
+        _data_index = (80, 120)
+        _chose_index = (15, 25)
+
+    def __init__(self, alpha=_alpha, limit=_limit,
+                 trigger_th=_trigger_th, slope_th=_slope_th, leave_ratio_th=_leave_ratio_th,
+                 leave_cnt_th=_leave_cnt_th, touch_cnt_th=_touch_cnt_th,
+                 base_index=_base_index, data_index=_data_index, chose_index=_chose_index):
+        self.__skip_frame = 100
+        self.alpha = alpha
+        self.limit = limit
+        self.trigger_th = trigger_th
+        self.slope_th = slope_th
+        self.leave_ratio_th = leave_ratio_th
+        self.leave_cnt_th = leave_cnt_th
+        self.touch_cnt_th = touch_cnt_th
+        self.base_index = base_index
+        self.data_index = data_index
+        self.chose_index = chose_index
+
+    def __from_rawdata_to_matrix(self, rawdata):
+        """
+        从rawdata中提取打点的矩阵
+
+        :param rawdata: np.array, shape: N * CHS
+        :return: out_data: np.array，shape: k * CHS, k为打点次数
+        """
+        if rawdata.ndim == 1:
+            rawdata = np.reshape(rawdata, newshape=(-1, 1))
+        plt.figure(1)
+        CHS = rawdata.shape[1]
+        figM = (CHS + 1) // 2
+        raw = np.vstack(
+            (np.tile(rawdata[0], [self.__skip_frame, 1]), rawdata, np.tile(rawdata[-1], [self.__skip_frame, 1])))
+        bsl = raw + 0  # equal to deepcopy
+        force_flag = np.zeros(shape=(raw.shape[0], 1))
+        last_maxch = peak = touch_cnt = 0
+        leave_cnt = 9999
+        out_data = np.zeros(shape=(0, CHS))
+        for i in range(self.__skip_frame, raw.shape[0]):
+            force_flag[i] = force_flag[i - 1]
+            sig = raw[i] - bsl[i - 1]
+            maxch = np.argmax(sig, axis=0)
+            if force_flag[i - 1] == 0:
+                delta = raw[i] - bsl[i - 1]
+                leave_cnt += 1
+                for ch in range(CHS):  # bsl tracking
+                    bsl[i, ch] = bsl[i - 1, ch] + np.sign(delta[ch]) * min(self.alpha * abs(delta[ch]), self.limit)
+                if ((raw[i, maxch] - raw[i - 1, maxch] > self.slope_th) or
+                    (raw[i - 1, maxch] - raw[i - 2, maxch] > self.slope_th)) and \
+                        sig[maxch] > self.trigger_th and leave_cnt > self.leave_cnt_th:  # force_flag trigger
+                    force_flag[i] = 1
+                    last_maxch = maxch
+                    peak = sig[last_maxch]
+                    touch_cnt = 0
+            else:
+                bsl[i] = bsl[i - 1] + 0
+                touch_cnt += 1
+                if sig[maxch] > peak:
+                    peak = sig[maxch]
+                    last_maxch = maxch
+                if sig[last_maxch] < self.leave_ratio_th * peak and raw[i, last_maxch] > raw[i - 2, last_maxch] \
+                        and touch_cnt > self.touch_cnt_th:
+                    force_flag[i] = 0
+                    leave_cnt = 0
+            if force_flag[i - 1] == 0 and force_flag[i] == 1:
+                base = np.sort(raw[i + self.base_index[0]:i + self.base_index[1]], axis=0)
+                data = np.sort(raw[i + self.data_index[0]:i + self.data_index[1]], axis=0)
+                base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
+                data = np.mean(data[self.chose_index[0]:self.chose_index[1]], axis=0)
+                out_data = np.r_[out_data, np.reshape(data - base, (1, CHS))]
+                for ch in range(CHS):
+                    plt.subplot(figM, 2, ch + 1)
+                    plt.plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
+                             raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
+                    plt.plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
+                             raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
+        for ch in range(CHS):
+            plt.subplot(figM, 2, ch + 1)
+            plt.plot(raw[:, ch], label='raw')
+            plt.plot(bsl[:, ch], label='baseline')
+            plt.plot(raw[0, ch] + force_flag * 100, label='forceflag')
+            plt.legend()
+            plt.title('CH' + str(ch + 1))
+        return out_data
+
+    def __call__(self, rawdata, save_filename=None):
+        out_data = self.__from_rawdata_to_matrix(rawdata)
+        out_data = butter_bandpass_filter(out_data)
+        print('out_data shape: ', out_data.shape)
+        plt.figure(2)
+        plt.plot(out_data, '-o')
+        plt.ylabel('ADC')
+        plt.grid(True)
+        plt.show()
+        if save_filename is not None:
+            np.savetxt(save_filename, out_data, fmt='%+6.1f', delimiter='\t')
+            print(save_filename + ' file saved successfully')
+        else:
+            warnings.warn('warning message: filename not assigned, so not saved')
+        return
+
+    def __get_front_rear_points(self, data_norm, peak_pos, template_len, ratio, front_ch, rear_ch):
+        """
+        private for generate_template
+
+        :param data_norm:
+        :param peak_pos:
+        :param template_len:
+        :param ratio:
+        :param front_ch:
+        :param rear_ch:
+        :return:
+        """
+        if isinstance(template_len, int):  # 优先使用 template_len
+            for front_points in range(data_norm.shape[0]):
+                rear_points = template_len - (peak_pos[rear_ch] - peak_pos[front_ch]) - front_points
+                if rear_points + peak_pos[rear_ch] >= data_norm.shape[0] or \
+                        peak_pos[front_ch] - front_points >= peak_pos[0]:
+                    continue
+                if data_norm[peak_pos[front_ch] - front_points, 0] <= \
+                        data_norm[peak_pos[rear_ch] + rear_points, -1]:
+                    print('template_len:', template_len, ', front_points:', front_points - 1, ', rear_points:',
+                          rear_points)
+                    return template_len, front_points - 1, rear_points + 1
+            print('error: template_len=', template_len, ', 但数据没有这么长')
+            exit()
+        else:  # 然后使用ratio
+            front_points = peak_pos[0]
+            for i in range(peak_pos[0]):
+                if data_norm[peak_pos[0] - i, 0] < data_norm[peak_pos[0], 0] * ratio:
+                    front_points = i - 2
+                    break
+            rear_points = data_norm.shape[0] - peak_pos[1]
+            for i in range(data_norm.shape[0] - peak_pos[-1]):
+                if data_norm[peak_pos[-1] + i, -1] < data_norm[peak_pos[-1], -1] * ratio:
+                    rear_points = i + 1
+                    break
+            template_len = peak_pos[-1] - peak_pos[0] + rear_points + front_points
+            print('template_len:', template_len, ', front_points:', front_points, ', rear_points:', rear_points - 1)
+            return template_len, front_points, rear_points
+
+    def __get_mean_tempalte(self, data_list, peak_poses, template_len, front_points, rear_points, front_ch, rear_ch):
+        """
+        private for generate_template
+
+        :param data_list:
+        :param peak_poses:
+        :param template_len:
+        :param front_points:
+        :param rear_points:
+        :param front_ch:
+        :param rear_ch:
+        :return:
+        """
+        chs = data_list[0].shape[1]
+        template = np.zeros(shape=(template_len, chs))
+        for i, data in enumerate(data_list):
+            x = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, front_ch] - front_points + template_len)
+            for ch in range(chs):
+                xp = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, rear_ch] + rear_points)
+                yp = data[peak_poses[i, front_ch] - front_points:peak_poses[i, rear_ch] + rear_points, ch]
+                template[:, ch] += np.interp(x * xp.shape[0] / template_len, xp, yp)
+        return (template / np.max(template, axis=0) * 1024).astype(np.int)
+
+    def generate_mean_template(self, files, template_filename=None, template_len=None,
+                               ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
+        """
+        使用一系列的打点提取文件，生成公共模板
+        :param files: 一系列打点提取之后的文件
+        :param template_filename: 为None时不保存
+        :param template_len: 模板的长度，如果不为None，ratio不生效
+        :param ratio: 边缘通道两侧大于峰值的ratio
+        :param factor: 系数 如400/2.67*100，为1时表示ADC,否则为μV/100g
+        :param front_ch: 模板的设计时选择的对齐前面个通道，默认为第一通道
+        :param rear_ch:模板的设计时选择的对齐后面个通道，默认为最后通道
+        :return:
+        """
+
+        data_list = []
+        ylabel = 'ADC' if factor == 1 else 'μV'
+        for fid, file in enumerate(files):
+            print(fid, file)
+            with open(file, 'r', encoding='utf-8') as f:
+                fn = get_fig_title(file, (-1,))
+                data = np.array(pd.read_csv(f, header=None, skiprows=0, delimiter='\t'))
+                f.close()
+            np.set_printoptions(precision=3, suppress=True)
+            print('cali_coef:', 400 / data.max(0))
+            peak_pos = np.argmax(data, axis=0)
+            data_norm = data / np.max(data, axis=0) * 1024
+            data_list.append(data_norm)
+            try:
+                peak_poses = np.r_[(peak_poses, np.reshape(peak_pos, newshape=(1, -1)))]
+            except:  # 第一个文件执行
+                middle_ch = peak_pos.shape[0] // 2
+                peak_pos_default = peak_pos[middle_ch]
+                peak_poses = np.reshape(peak_pos, newshape=(1, -1))
+                pass
+            zero_point = peak_pos_default - peak_pos[middle_ch]
+            x = np.arange(zero_point, zero_point + data.shape[0])
+            # 画图
+            colori = fid % len(self._colors)
+            makeri = (fid // len(self._markers)) % len(self._markers)
+            plt.figure(1)
+            plt.plot(x, data[:, :-1] * factor, marker=self._markers[makeri], color=self._colors[colori])
+            plt.plot(x, data[:, -1] * factor, marker=self._markers[makeri], color=self._colors[colori], label=fn)
+            plt.ylabel(ylabel)
+            plt.legend()
+            plt.title('密集打点数据--未归一化')
+            plt.figure(2)
+            plt.plot(x, data_norm[:, :-1] * factor, marker=self._markers[makeri], color=self._colors[colori])
+            plt.plot(x, data_norm[:, -1] * factor, marker=self._markers[makeri], color=self._colors[colori], label=fn)
+            plt.legend()
+            plt.title('密集打点数据--归一化--1024')
+        fid = np.argmax(peak_poses[:, -1] - peak_poses[:, 0])
+        data_norm = data_list[fid]
+        peak_pos = peak_poses[fid]
+        template_len, front_points, rear_points = self.__get_front_rear_points(
+            data_norm, peak_pos, template_len, ratio, front_ch, rear_ch)
+        template = self.__get_mean_tempalte(data_list, peak_poses, template_len, front_points, rear_points, front_ch,
+                                            rear_ch)
+        print("template shape:", template.shape)
+        plt.figure(3)
+        plt.plot(template, '-o')
+        plt.title('mean template')
+        plt.show()
+        # 保存template到txt
+        if template_filename is not None:
+            np.savetxt(template_filename, template, fmt='%+6d', delimiter='\t')
+            print('template shape: ', template.shape)
+        else:
+            warnings.warn('warning message: filename not assigned, so not saved')
+        return template
+
+
+def get_fig_title(filename='test.txt', layers=(-1,)):
+    """
+    目的：有些绝对路径的文件名太长了，画图的时候想要一个短的文件名
+    获取文件名,用于画图的title，以及有时候生成存
+
+    Carry Chenli
+    :param filename: 完整的filename,一般很长
+    :param layers:  用'\'split之后，选择使用那些layer，先父目录layer，再子目录
+    :return: out_str: 较短的文件名
+    """
+    strs = filename.split('\\')
+    out_str = ''
+    for layer in layers:
+        if layer == -1:
+            strs_last = strs[layer].split('.')
+            for s in strs_last[:-1]:
+                out_str += s
+        else:
+            out_str += strs[layer] + '-'
+    return out_str
