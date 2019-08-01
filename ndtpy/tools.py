@@ -1132,14 +1132,15 @@ class ConditionTree:
         print('-*-*-*-*-*-*-end print tree-*-*-*-*-*-*-')
 
     @staticmethod
-    def load_rule_excel(filename):
+    def load_rule_excel(filename, rootname, k_indicator, v_indicator):
         rules = pd.read_excel(filename)
         rules = rules.fillna(method='pad')
-        root = ConditionTree('st_alg_rule')
+        root = ConditionTree(rootname)
+        # todo: 配置excel信息 
         for i in range(len(rules)):
             ru = rules.iloc[i]
-            k, v = ru.pop('bit'), ru.pop('detail')
-            path = tuple(list(ru) + [{'bit' + str(k): v}])
+            k, v = ru.pop(k_indicator), ru.pop(v_indicator)
+            path = tuple(list(ru) + [{k_indicator + str(k): v}])
             root.append_by_path(path)
         return root
 
