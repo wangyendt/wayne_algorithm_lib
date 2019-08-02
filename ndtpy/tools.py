@@ -31,7 +31,8 @@ try:
     import win32gui
     import win32process
 except ImportError:
-    logging.warn('Try install pywin32 on your computer')
+    logging.warn('Try install pywin32 on your computer from below website:\n'
+                 'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
 try:
     from PIL import Image
@@ -49,17 +50,19 @@ try:
     from pykeyboard import PyKeyboard
     from pymouse import PyMouse
 except ImportError:
-    logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer')
+    logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
+                 'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
 from scipy import signal
 
 """
 table of content:
 1. Useful tools:
-    a. (function) func_timer
-    b. (function) list_all_files
-    c. (class) GlobalHotKeys
-    d. (class) GuiOperation
+    a. (decorator) func_timer
+    b. (decorator) maximize_figure
+    c. (function) list_all_files
+    d. (class) GlobalHotKeys
+    e. (class) GuiOperation
 2. Data processing:
     a. (function) peak_det
     b. (function) butter_bandpass_filter
@@ -91,6 +94,16 @@ def func_timer(func):
     return wrapper
 
 
+def maximize_figure(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        ret = func(*args, **kwargs)
+        plt.get_current_fig_manager().window.showMaximized()
+        return ret
+
+    return wrapper
+
+
 def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     """
     列出某个文件下所有文件的全路径
@@ -101,6 +114,7 @@ def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     :param root: 根目录
     :param keys: 所有关键字
     :param outliers: 所有排除关键字
+    :param full_path: 是否返回全路径，True为全路径
     :return:
             所有根目录下包含关键字的文件全路径
     """
@@ -143,11 +157,14 @@ class GlobalHotKeys:
     key_mapping = []
     user32 = ctypes.windll.user32
 
-    MOD_ALT = win32con.MOD_ALT
-    MOD_CTRL = win32con.MOD_CONTROL
-    MOD_CONTROL = win32con.MOD_CONTROL
-    MOD_SHIFT = win32con.MOD_SHIFT
-    MOD_WIN = win32con.MOD_WIN
+    try:
+        MOD_ALT = win32con.MOD_ALT
+        MOD_CTRL = win32con.MOD_CONTROL
+        MOD_CONTROL = win32con.MOD_CONTROL
+        MOD_SHIFT = win32con.MOD_SHIFT
+        MOD_WIN = win32con.MOD_WIN
+    except:
+        pass
 
     def __init__(self):
         self._include_alpha_numeric_vks()
@@ -495,9 +512,8 @@ class FindLocalExtremeValue:
             if update_num > self.max_update_num:
                 break
         local_diff = local_x
-        return (local_diff, local_gap,
-                min_slope / self.min_slp_step ** 2, max_slope / self.min_slp_step ** 2,
-                local_extreme_real_value)
+        min_slp, max_slp = min_slope / self.min_slp_step ** 2, max_slope / self.min_slp_step ** 2
+        return local_diff, local_gap, min_slp, max_slp, local_extreme_real_value
 
 
 class DataProcessing:
@@ -1075,10 +1091,11 @@ class ConditionTree:
     Datetime: 2019/7/31 16:17
     """
 
-    def __init__(self, val: str):
-        self.val = val
+    def __init__(self, tag: str):
+        self.tag = tag
         self.children = []
-        self.kvp = dict()
+        self.attribute = dict()
+        self.text = ''
 
     def append_by_path(self, path: list):
         """
@@ -1088,20 +1105,20 @@ class ConditionTree:
         """
         if not path: return
         p = path[0]
-        if isinstance(p, dict):
-            self.kvp.update(p)
-        else:
-            for ch in self.children:
-                if p == ch.val:
-                    ch.append_by_path(path[1:])
-                    return
-            self.children.append(ConditionTree(p))
-            self.children[-1].append_by_path(path[1:])
+        for ch in self.children:
+            if p['tag'] == ch.tag:
+                ch.append_by_path(path[1:])
+                return
+        child = ConditionTree(p['tag'])
+        child.attribute = p['attrib']
+        child.text = p['text']
+        self.children.append(child)
+        self.children[-1].append_by_path(path[1:])
 
     def find(self, nick_name: str) -> 'ConditionTree':
         if not self.children: return None
         for ch in self.children:
-            if ch.val == nick_name:
+            if ch.tag == nick_name:
                 return ch
             res = ch.find(nick_name)
             if res: return res
@@ -1112,7 +1129,7 @@ class ConditionTree:
         while path:
             p = path.pop(0)
             for ch in cur.children:
-                if p == ch.val:
+                if p == ch.tag:
                     cur = ch
                     if not path:
                         return cur
@@ -1120,144 +1137,16 @@ class ConditionTree:
             else:
                 return None
 
-    def print(self):
+    def print_path(self):
         def helper(_tree):
             if not _tree: return []
-            if not _tree.children and _tree.kvp:
-                return [[_tree.val + ' -> ' + kvp[0] + ': ' + kvp[1]] for kvp in _tree.kvp.items()]
-            return [[_tree.val] + res for ch in _tree.children for res in helper(ch)]
+            if not _tree.children and _tree.text:
+                return [[_tree.tag + ': ' + _tree.text]]
+            return [[_tree.tag] + res for ch in _tree.children for res in helper(ch)]
 
-        print('-*-*-*-*-*-*-start print tree-*-*-*-*-*-*-')
+        print('-*-*-*-*-*-*- start print tree -*-*-*-*-*-*-')
         [print(' -> '.join(h)) for h in helper(self)]
-        print('-*-*-*-*-*-*-end print tree-*-*-*-*-*-*-')
-
-    @staticmethod
-    def load_rule_excel(filename, rootname, k_indicator, v_indicator):
-        rules = pd.read_excel(filename)
-        rules = rules.fillna(method='pad')
-        root = ConditionTree(rootname)
-        # todo: 配置excel信息 
-        for i in range(len(rules)):
-            ru = rules.iloc[i]
-            k, v = ru.pop(k_indicator), ru.pop(v_indicator)
-            path = tuple(list(ru) + [{k_indicator + str(k): v}])
-            root.append_by_path(path)
-        return root
-
-    @staticmethod
-    def example1():
-        root = ConditionTree('st_alg_rule')
-        root.children = [
-            ConditionTree('forceflag'),
-            ConditionTree('baseline'),
-            ConditionTree('touchflag'),
-            ConditionTree('positiondetect'),
-            ConditionTree('buttondetect')
-        ]
-
-        root.find('forceflag').children = [
-            ConditionTree('group0'),
-        ]
-
-        root.find('group0').children = [
-            ConditionTree('ff_rel_key'),
-            ConditionTree('ff_pos_tri'),
-            ConditionTree('ff_neg_tri'),
-            ConditionTree('ff_neg_rel'),
-            ConditionTree('ff_pos_rel')
-        ]
-        root.find('ff_rel_key').kvp = {
-            'bit0': '负force flag离手',
-            'bit1': '正force flag离手',
-            'bit2': '敲击事件',
-            'bit3': 'timeout',
-            'bit8': 'timeout后负信号归零',
-            'bit9': '单个通道极大'
-        }
-
-        root.find('ff_pos_tri').kvp = {
-            'bit0': '(0 == (st_fv.err_state[group] & FORCE_ERR_MASK))',
-            'bit1': '(st_fv.force_val[max_ch] > thr_coeff * FF_TRI_TH)',
-            'bit2': '(slpTmp > thr_coeff * FF_SLP_TH1)',
-            'bit3': '(slpTmp2 > thr_coeff * FF_SLP_TH2)',
-            'bit4': '(st_fv.force_local[max_ch] < -thr_coeff * FF_LOCAL_TH)',
-            'bit5': '满足历史基线条件'
-        }
-
-        root.find('ff_neg_tri').kvp = {
-            'bit0': '(0 == (st_fv.err_state[group] & FORCE_ERR_MASK))',
-            'bit1': '(st_fv.force_val[max_ch] < -thr_coeff * FF_TRI_TH)',
-            'bit2': '(slpTmp < -thr_coeff * FF_SLP_TH1)',
-            'bit3': '(slpTmp2 < -thr_coeff * FF_SLP_TH2)',
-            'bit4': '(st_fv.force_local[max_ch] < -thr_coeff * FF_LOCAL_TH)',
-            'bit5': '(st_ff.rel_cnt[group] > 50)',
-            'bit6': '(~st_fv.err_state[0] & FORCE_ERR_STATE_HIGH_TEMP)'
-        }
-
-        root.find('ff_neg_rel').kvp = {
-            'bit0': '(st_fv.force_val[max_ch] > ff_leave_coeff * st_fv.force_valley[max_ch])',
-            'bit1': '(st_fv.force_val[max_ch] > -FF_REL_TH)'
-        }
-
-        root.find('ff_pos_rel').kvp = {
-            'bit0': '(st_fv.force_val[max_ch] < ff_leave_coeff * st_fv.force_peak[max_ch])',
-            'bit1': '(st_fv.force_val[max_ch] < FF_REL_TH)'
-        }
-
-        root.print()
-        print(root.find('ff_pos_rel').val)
-        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
-
-    @staticmethod
-    def example2():
-        root = ConditionTree('st_alg_rule')
-        for path in [
-            ('forceflag', 'group0', 'ff_rel_key', {'bit0': '负force flag离手'}),
-            ('forceflag', 'group0', 'ff_rel_key', {'bit1': '正force flag离手'}),
-            ('forceflag', 'group0', 'ff_rel_key', {'bit2': '敲击事件'}),
-            ('forceflag', 'group0', 'ff_rel_key', {'bit3': 'timeout'}),
-            ('forceflag', 'group0', 'ff_rel_key', {'bit8': 'timeout后负信号归零'}),
-            ('forceflag', 'group0', 'ff_rel_key', {'bit9': '单个通道极大'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit0': '(0 == (st_fv.err_state(group) & FORCE_ERR_MASK))'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit1': '(st_fv.force_val(max_ch) > thr_coeff * FF_TRI_TH)'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit2': '(slpTmp > thr_coeff * FF_SLP_TH1)'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit3': '(slpTmp2 > thr_coeff * FF_SLP_TH2)'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit4': '(st_fv.force_local(max_ch) < -thr_coeff * FF_LOCAL_TH)'}),
-            ('forceflag', 'group0', 'ff_pos_tri', {'bit5': '满足历史基线条件'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit0': '(0 == (st_fv.err_state(group) & FORCE_ERR_MASK))'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit1': '(st_fv.force_val(max_ch) < -thr_coeff * FF_TRI_TH)'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit2': '(slpTmp < -thr_coeff * FF_SLP_TH1)'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit3': '(slpTmp2 < -thr_coeff * FF_SLP_TH2)'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit4': '(st_fv.force_local(max_ch) < -thr_coeff * FF_LOCAL_TH)'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit5': '(st_ff.rel_cnt(group) > 50)'}),
-            ('forceflag', 'group0', 'ff_neg_tri', {'bit6': '(~st_fv.err_state(0) & FORCE_ERR_STATE_HIGH_TEMP)'}),
-            ('forceflag', 'group0', 'ff_neg_rel', {'bit0':
-                                                       '(st_fv.force_val(max_ch) > ff_leave_coeff * st_fv.force_valley(max_ch))'}),
-            ('forceflag', 'group0', 'ff_neg_rel', {'bit1': '(st_fv.force_val(max_ch) > -FF_REL_TH)'}),
-            ('forceflag', 'group0', 'ff_pos_rel', {'bit0':
-                                                       '(st_fv.force_val(max_ch) < ff_leave_coeff * st_fv.force_peak(max_ch))'}),
-            ('forceflag', 'group0', 'ff_pos_rel', {'bit1': '(st_fv.force_val(max_ch) < FF_REL_TH)'}),
-        ]:
-            root.append_by_path(path)
-        root.print()
-        print(root.find('ff_pos_rel').val)
-        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
-
-    @staticmethod
-    def example3():
-        with open('_proj_name.txt', 'r') as f:
-            proj = f.readline()
-        rules = pd.read_excel(proj + '_logic_rule.xlsx')
-        rules = rules.fillna(method='pad')
-        root = ConditionTree('st_alg_rule')
-        for i in range(len(rules)):
-            ru = rules.iloc[i]
-            k, v = ru.pop('bit'), ru.pop('detail')
-            path = tuple(list(ru) + [{'bit' + str(k): v}])
-            root.append_by_path(path)
-        root.print()
-        print(root.find('ff_pos_rel').val)
-        print(root.find_by_path(['forceflag', 'group0', 'ff_pos_rel']).val)
+        print('-*-*-*-*-*-*- end print tree -*-*-*-*-*-*-')
 
 
 class XmlIO:
@@ -1277,13 +1166,15 @@ class XmlIO:
         root = tree.getroot()
 
         def helper(_tree: ET.Element, _is_root=True):
-            if not _tree: return [[{_tree.tag: _tree.text.replace('\t', '').replace('\n', '')}]]
-            text = [] if _is_root else [_tree.tag.replace('\t', '').replace('\n', '')]
-            return [text + res for ch in _tree for res in helper(ch, False)]
+            if not _tree: return [[{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]]
+            ret = [] if _is_root else [{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]
+            return [ret + res for ch in _tree for res in helper(ch, False)]
 
         c_tree = ConditionTree(root.tag)
+        c_tree.attribute = root.attrib
+        c_tree.text = root.text.strip('\t\n')
         [c_tree.append_by_path(p) for p in helper(root)]
-        # c_tree.print()
+        # c_tree.print_path()
         return c_tree
 
     def write(self, root_name, tree: ConditionTree):
@@ -1297,7 +1188,7 @@ class XmlIO:
                     ET.SubElement(etree, k).text = v
             else:
                 for ch in c_tree.children:
-                    son = ET.SubElement(etree, ch.val)
+                    son = ET.SubElement(etree, ch.tag)
                     helper(son, ch)
 
         helper(_root, tree)
@@ -1509,20 +1400,20 @@ class GeneratePrivateModel:
     """
     根据校准点数据和公共模板，生成私有模板
 
-    Author:   shinelin
-    Datetime: 2019/7/29 14:29
+    Author:   Shine Lin
+    Datetime: 2019/8/2 21:24
 
-    校准点规模为1 X Chanels，公共模板规模为 points X Chanels
+    校准点规模为1 self.X Chanels，公共模板规模为 points self.X Chanels
     example:
-        MODEL = generate_private_model(data, model)
-        pri_model, model, X, P = MODEL.generate_model('app22')
-        其中pri_model是私有模板,P为处理后的校准点数据，X为P的横坐标,model是处理后的公共模板
+        MODEL = generate_private_model( model)
+        pri_model, model, data_X, data = MODEL.generate_model(data,ways)
+        MODEL.plot_model(path[len(root)+1:])
+        其中pri_model是私有模板,model是处理后的公共模板,data为处理后的校准点数据，data_X为P的横坐标,
         实参'app22','app32'为逼近型方法，’int42','int33'为插值型方法，不指定时默认为'int42'
-        在目录下会生成存有私有模板数据的文本，private_model.txt
+        调用MODEL.plot_model(path[len(root)+1:])可以画出对应的图，其中实参可略，为图的标题
     """
 
-    def __init__(self, data, model):
-        self.data = data
+    def __init__(self, model):
         self.model = model
         self.iterations = 9
         self.ways = 'int42'
@@ -1542,7 +1433,7 @@ class GeneratePrivateModel:
                 break
         return self.model
 
-    def subdivision(self, P, X):
+    def subdivision(self):
         if self.ways == 'app22':
             a, mpoint, pnary, pnary_a, sub_type = 1 / 4, 2, 2, 0, 'dual'
         elif self.ways == 'app32':
@@ -1561,137 +1452,151 @@ class GeneratePrivateModel:
             n_v = n_v + 0 if self.ways.find('int') >= 0 else n_v + 1
         py = 0
         while py < n_v:
-            P = np.vstack([P[0, :], P, P[-1, :]])
-            X = np.hstack([X[0], X, X[-1]])
+            self.P = np.vstack([self.P[0, :], self.P, self.P[-1, :]])
+            self.X = np.hstack([self.X[0], self.X, self.X[-1]])
             py += 1
-        print('延拓虚拟点数：' + str(n_v * 2) + '\n' + '延拓后初始点数：' + str(X.size))
+        print('延拓虚拟点数：' + str(n_v * 2) + '\n' + '延拓后初始点数：' + str(self.X.size))
         print('延拓后横坐标点集合：')
-        print(X)
+        print(self.X)
         print('细分方法：' + self.ways + '\n' + '细分次数k=' + str(self.iterations))
         while self.iterations > 0:
-            P_new = np.zeros([(P.shape[0] - mpoint + 1) * pnary + pnary_a, P.shape[1]])
-            X_new = np.zeros((X.shape[0] - mpoint + 1) * pnary + pnary_a)
+            P_new = np.zeros([(self.P.shape[0] - mpoint + 1) * pnary + pnary_a, self.P.shape[1]])
+            X_new = np.zeros((self.X.shape[0] - mpoint + 1) * pnary + pnary_a)
             if self.ways == 'app22':
-                for i in range(0, P.shape[0] - mpoint + 1):
-                    P_new[2 * i, :] = (1 - a) * P[i, :] + a * P[i + 1, :]
-                    P_new[2 * i + 1, :] = a * P[i, :] + (1 - a) * P[i + 1, :]
-                    X_new[2 * i] = (1 - a) * X[i] + a * X[i + 1]
-                    X_new[2 * i + 1] = a * X[i] + (1 - a) * X[i + 1]
+                for i in range(0, self.P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = (1 - a) * self.P[i, :] + a * self.P[i + 1, :]
+                    P_new[2 * i + 1, :] = a * self.P[i, :] + (1 - a) * self.P[i + 1, :]
+                    X_new[2 * i] = (1 - a) * self.X[i] + a * self.X[i + 1]
+                    X_new[2 * i + 1] = a * self.X[i] + (1 - a) * self.X[i + 1]
             elif self.ways == 'app32':
-                for i in range(0, P.shape[0] - mpoint + 1):
-                    P_new[2 * i, :] = P[i, :] / 2 + P[i + 1, :] / 2
-                    P_new[2 * i + 1, :] = a * P[i, :] + (1 - 2 * a) * P[i + 1, :] + a * P[i + 2, :]
-                    X_new[2 * i] = X[i] / 2 + X[i + 1] / 2
-                    X_new[2 * i + 1] = a * X[i] + (1 - 2 * a) * X[i + 1] + a * X[i + 2]
+                for i in range(0, self.P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = self.P[i, :] / 2 + self.P[i + 1, :] / 2
+                    P_new[2 * i + 1, :] = a * self.P[i, :] + (1 - 2 * a) * self.P[i + 1, :] + a * self.P[i + 2, :]
+                    X_new[2 * i] = self.X[i] / 2 + self.X[i + 1] / 2
+                    X_new[2 * i + 1] = a * self.X[i] + (1 - 2 * a) * self.X[i + 1] + a * self.X[i + 2]
             elif self.ways == 'int42':
-                for i in np.arange(0, P.shape[0] - mpoint + 1):
-                    P_new[2 * i, :] = P[i + 1, :]
-                    X_new[2 * i] = X[i + 1]
-                    P_new[2 * i + 1, :] = -a * P[i, :] + \
-                                          (1 / 2 + a) * P[i + 1, :] + \
-                                          (1 / 2 + a) * P[i + 2, :] - a * P[i + 3, :]
-                    X_new[2 * i + 1] = -a * X[i] + (1 / 2 + a) * X[i + 1] + (1 / 2 + a) * X[i + 2] - a * X[i + 3]
+                for i in np.arange(0, self.P.shape[0] - mpoint + 1):
+                    P_new[2 * i, :] = self.P[i + 1, :]
+                    X_new[2 * i] = self.X[i + 1]
+                    P_new[2 * i + 1, :] = -a * self.P[i, :] + \
+                                          (1 / 2 + a) * self.P[i + 1, :] + \
+                                          (1 / 2 + a) * self.P[i + 2, :] - a * self.P[i + 3, :]
+                    X_new[2 * i + 1] = -a * self.X[i] + (1 / 2 + a) * self.X[i + 1] + (1 / 2 + a) * self.X[i + 2] - a * \
+                                       self.X[i + 3]
             elif self.ways == 'int33':
-                for i in np.arange(0, P.shape[0] - mpoint + 1):
-                    P_new[3 * i, :] = b * P[i, :] + (1 - b - a) * P[i + 1, :] + a * P[i + 2, :]
-                    X_new[3 * i] = b * X[i] + (1 - b - a) * X[i + 1] + a * X[i + 2]
-                    P_new[3 * i + 1, :] = P[i + 1, :]
-                    X_new[3 * i + 1] = X[i + 1]
-                    P_new[3 * i + 2, :] = a * P[i, :] + (1 - b - a) * P[i + 1, :] + b * P[i + 2, :]
-                    X_new[3 * i + 2] = a * X[i] + (1 - b - a) * X[i + 1] + b * X[i + 2]
+                for i in np.arange(0, self.P.shape[0] - mpoint + 1):
+                    P_new[3 * i, :] = b * self.P[i, :] + (1 - b - a) * self.P[i + 1, :] + a * self.P[i + 2, :]
+                    X_new[3 * i] = b * self.X[i] + (1 - b - a) * self.X[i + 1] + a * self.X[i + 2]
+                    P_new[3 * i + 1, :] = self.P[i + 1, :]
+                    X_new[3 * i + 1] = self.X[i + 1]
+                    P_new[3 * i + 2, :] = a * self.P[i, :] + (1 - b - a) * self.P[i + 1, :] + b * self.P[i + 2, :]
+                    X_new[3 * i + 2] = a * self.X[i] + (1 - b - a) * self.X[i + 1] + b * self.X[i + 2]
             if self.ways == 'int42':
                 i += 1
-                P_new[2 * i, :] = P[i + 1, :]
-                X_new[2 * i] = X[i + 1]
+                P_new[2 * i, :] = self.P[i + 1, :]
+                X_new[2 * i] = self.X[i + 1]
             elif self.ways == 'app32':
                 i += 1
-                P_new[2 * i, :] = P[i, :] / 2 + P[i + 1, :] / 2
-                X_new[2 * i] = X[i] / 2 + X[i + 1] / 2
+                P_new[2 * i, :] = self.P[i, :] / 2 + self.P[i + 1, :] / 2
+                X_new[2 * i] = self.X[i] / 2 + self.X[i + 1] / 2
             # 拟合型方法需要通过归一输出
             if self.ways.find('app') >= 0:
                 for ch in range(0, P_new.shape[1]):
                     P_new[:, ch] = P_new[:, ch] / np.max(np.max(P_new[:, ch])) * 1024
-            P = P_new
-            X = X_new
+            self.P = P_new
+            self.X = X_new
             self.iterations = self.iterations - 1
-        return X_new, P_new
 
-    def find_axis(self, P, X, model_x):
+    def find_axis(self, model_x):
         pri_model_x = np.zeros_like(model_x)
-        pri_model = np.zeros([pri_model_x.shape[0], P.shape[1]])
+        pri_model = np.zeros([pri_model_x.shape[0], self.P.shape[1]])
         for i in np.arange(model_x.shape[0]):
-            pri_model_x[i] = np.argmin(abs(X - model_x[i]))
-            pri_model[i] = P[pri_model_x[i], :]
+            pri_model_x[i] = np.argmin(abs(self.X - model_x[i]))
+            pri_model[i] = self.P[pri_model_x[i], :]
         return pri_model
 
-    def generate_model(self, ways='int42', iterations=9):
+    def generate_model(self, data, ways='int42', model_door=True, iterations=9):
         self.iterations = iterations
         self.ways = ways
+        self.data = data
         for ch in range(0, self.model.shape[1]):
             self.model[:, ch] = self.model[:, ch] / np.max(np.max(self.model[:, ch])) * 1024
-        # 剔除首末小于50%的顶点
-        self.model = self.model_process()
-        self.model = butter_bandpass_filter(self.model)
+        if model_door:
+            # 剔除首末小于50%的顶点
+            self.model = self.model_process()
+            self.model = butter_bandpass_filter(self.model)
         model_x = np.arange(0, self.model.shape[0])
-
-        data_X = np.arange(0, self.data.shape[0])
+        self.data_X = np.arange(0, self.data.shape[0])
         for ch in range(0, self.model.shape[1]):
             self.data[:, ch] = self.data[:, ch] / np.max(np.max(self.data[:, ch])) * 1024
-            data_X[ch] = self.model[:, ch].argmax()
+            self.data_X[ch] = self.model[:, ch].argmax()
+        # data_begin = self.model[0, :] + self.P[0, :] - self.model[self.X[0], :]
+        # data_end = self.model[-1, :] + self.P[-1, :] - self.model[self.X[-1], :]
+        # self.P = np.vstack([data_begin, self.P, data_end])
+        self.data = np.vstack([self.model[0, :], self.data, self.model[-1, :]])
+        self.data_X = np.hstack([model_x[0], self.data_X, model_x[-1]])
         # P和X首尾增加model的首尾点
-        P = self.data
-        X = data_X
-        # data_begin = self.model[0, :] + P[0, :] - self.model[X[0], :]
-        # data_end = self.model[-1, :] + P[-1, :] - self.model[X[-1], :]
-        # P = np.vstack([data_begin, P, data_end])
-        P = np.vstack([self.model[0, :], P, self.model[-1, :]])
-        X = np.hstack([model_x[0], X, model_x[-1]])
-        (X_new, P_new) = self.subdivision(P, X)
-        pri_model = self.find_axis(P_new, X_new, model_x)
-        np.savetxt('private_model.txt', pri_model, '%d')
-        return pri_model, self.model, X, P
+        self.P = self.data
+        self.X = self.data_X
+        self.subdivision()
+        pri_model = self.find_axis(model_x)
+        # np.savetxt('private_model.txt', pri_model, '%d')
+        self.pri_model = pri_model
+        return self.pri_model, self.model, self.data_X, self.data
+
+    def plot_model(self, titlename='good'):
+        plt.figure()
+        coss = np.zeros(self.pri_model.shape[1])
+        for ch in range(self.pri_model.shape[1]):
+            plt.suptitle(titlename, fontsize=18)
+            plt.subplot(math.ceil(self.pri_model.shape[1] / 2), 2, ch + 1)
+            plt.title('CH' + str(ch))
+            plt.plot(self.pri_model[:, ch], 'r-*', markersize=4)
+            plt.plot(self.model[:, ch], 'b-o', markersize=4)
+            plt.plot(self.data_X, self.data[:, ch], 'ko', markersize=6)
+            coss[ch] = round(np.dot(self.model[:, ch], self.pri_model[:, ch]) / (
+                    np.linalg.norm(self.model[:, ch], ord=2, keepdims=False) *
+                    np.linalg.norm(self.pri_model[:, ch], ord=2, keepdims=False)), 5)
+            plt.legend(['Pri_model', 'Pub_model', 'Cali_points'])
+        print('各个chanel的拟合度:')
+        print(coss)
+        plt.show()
 
 
 # Carry
 
 class ExtractDotData:
     """
-    提取数据
+    提取密集打点数据
 
-    Carry Chenli
+    Carry Chen
 
     example:
+    save_folder = 'result_folder' 
     edd = ExtractDotData()
-    folder = r'E:\Projects\PT101\密集打点数据\20190730_#2vs#4'
-    save_folder = 'template\\deleteme_rightnow'
-    if not os.path.exists(folder):
-        os.makedirs(path=folder)
-    files = list_all_files(folder, ['', '.txt'], ['finger'])
-    for fid, file in enumerate(files):
-        with open(file, 'r', encoding='utf-8') as f:
-            data = np.array(pd.read_csv(f, header=None, skiprows=2, delimiter='\t'))
-            f.close()
-        rawdata = data[:, 2:9]
-        edd(rawdata, save_folder + '\\' + str(fid) + '.txt')
-
+    for fid,f in enumerate(list_all_files('打点数据文件夹'，['.txt'])):
+        simple_file_name = get_fig_title(f,(-1,))
+        rawdata = 你从file里面读出的rawdata, np.array, shape = N * chs
+        edd(rawdata, save_folder + '//' + simple_file_name + '.txt')
     files = list_all_files(save_folder, ['.txt'])
     edd.generate_mean_template(files, template_len=None)
     """
-    if True:  # 默认参数
+    # 默认参数
+    if True:
         plt.rcParams['font.family'] = 'FangSong'
         plt.rcParams['axes.unicode_minus'] = False
         _markers = ('o', 's', 'p', '*', '+', '<', '>', '^')
         _colors = ('blue', 'green', 'red', 'orange', 'gray', 'yellow', 'pink', 'black')
 
         # baseline tracking
-        _alpha = 0.001
+        _alpha = 0.005
         _limit = 5
         # force flag
         _trigger_th = 20
         _slope_th = 0
         _leave_ratio_th = 0.1
-        _leave_cnt_th = 50
-        _touch_cnt_th = 50
+        _leave_cnt_th = 100
+        _touch_cnt_th = 100
         # a better setting for PT101
         # base_index = [-150, -50]
         # data_index = [100, 200]
@@ -1726,9 +1631,7 @@ class ExtractDotData:
         """
         if rawdata.ndim == 1:
             rawdata = np.reshape(rawdata, newshape=(-1, 1))
-        plt.figure(1)
         CHS = rawdata.shape[1]
-        figM = (CHS + 1) // 2
         raw = np.vstack(
             (np.tile(rawdata[0], [self.__skip_frame, 1]), rawdata, np.tile(rawdata[-1], [self.__skip_frame, 1])))
         bsl = raw + 0  # equal to deepcopy
@@ -1736,6 +1639,7 @@ class ExtractDotData:
         last_maxch = peak = touch_cnt = 0
         leave_cnt = 9999
         out_data = np.zeros(shape=(0, CHS))
+        ff_point = []
         for i in range(self.__skip_frame, raw.shape[0]):
             force_flag[i] = force_flag[i - 1]
             sig = raw[i] - bsl[i - 1]
@@ -1768,29 +1672,35 @@ class ExtractDotData:
                 base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
                 data = np.mean(data[self.chose_index[0]:self.chose_index[1]], axis=0)
                 out_data = np.r_[out_data, np.reshape(data - base, (1, CHS))]
-                for ch in range(CHS):
-                    plt.subplot(figM, 2, ch + 1)
-                    plt.plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
-                             raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
-                    plt.plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
-                             raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
+                ff_point.append(i)
+        return out_data, raw, bsl, force_flag, ff_point
+
+    def __call__(self, rawdata, fig_name=None, save_filename=None, filter_flag=True):
+        out_data, raw, bsl, force_flag, ff_point = self.__from_rawdata_to_matrix(rawdata)
+        if filter_flag:
+            out_data = butter_bandpass_filter(out_data)
+        print('out_data shape: ', out_data.shape)
+        CHS = out_data.shape[1]
+        figM = (CHS + 1) // 2
+        plt.figure(1)
         for ch in range(CHS):
             plt.subplot(figM, 2, ch + 1)
             plt.plot(raw[:, ch], label='raw')
             plt.plot(bsl[:, ch], label='baseline')
             plt.plot(raw[0, ch] + force_flag * 100, label='forceflag')
+            for i in ff_point:
+                plt.plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
+                         raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
+                plt.plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
+                         raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
             plt.legend()
             plt.title('CH' + str(ch + 1))
-        return out_data
-
-    def __call__(self, rawdata, save_filename=None):
-        out_data = self.__from_rawdata_to_matrix(rawdata)
-        out_data = butter_bandpass_filter(out_data)
-        print('out_data shape: ', out_data.shape)
+        plt.suptitle(fig_name)
         plt.figure(2)
         plt.plot(out_data, '-o')
         plt.ylabel('ADC')
         plt.grid(True)
+        plt.suptitle(fig_name)
         plt.show()
         if save_filename is not None:
             np.savetxt(save_filename, out_data, fmt='%+6.1f', delimiter='\t')
@@ -1862,8 +1772,8 @@ class ExtractDotData:
                 template[:, ch] += np.interp(x * xp.shape[0] / template_len, xp, yp)
         return (template / np.max(template, axis=0) * 1024).astype(np.int)
 
-    def generate_mean_template(self, files, template_filename=None, template_len=None,
-                               ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
+    def generate_template(self, files, template_filename=None, template_len=None,
+                          ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
         """
         使用一系列的打点提取文件，生成公共模板
         :param files: 一系列打点提取之后的文件
@@ -1876,6 +1786,9 @@ class ExtractDotData:
         :return:
         """
 
+        if len(files) == 0:
+            print('错误：传入的files为空')
+            exit()
         data_list = []
         ylabel = 'ADC' if factor == 1 else 'μV'
         for fid, file in enumerate(files):
@@ -1895,7 +1808,6 @@ class ExtractDotData:
                 middle_ch = peak_pos.shape[0] // 2
                 peak_pos_default = peak_pos[middle_ch]
                 peak_poses = np.reshape(peak_pos, newshape=(1, -1))
-                pass
             zero_point = peak_pos_default - peak_pos[middle_ch]
             x = np.arange(zero_point, zero_point + data.shape[0])
             # 画图
@@ -1932,6 +1844,30 @@ class ExtractDotData:
             warnings.warn('warning message: filename not assigned, so not saved')
         return template
 
+    def read_and_compare_template(self, files):
+        """
+        画图比较模板
+        :param files:
+        :return:
+        """
+        peak_pos_default = 40
+        for fid, file in enumerate(files):
+            print(fid, file)
+            with open(file, 'r', encoding='utf-8') as f:
+                fn = get_fig_title(file, (-1,))
+                data = np.array(pd.read_csv(f, header=None, skiprows=0, delimiter='\t'))
+                f.close()
+            zero_point = peak_pos_default - data[:, 3].argmax()
+            x_ord = np.arange(zero_point, zero_point + data.shape[0])
+            colori = fid % len(self._colors)
+            makeri = (fid * (len(self._markers) - 1) // len(self._markers)) % len(self._markers)
+            plt.plot(x_ord, data[:, :-1], marker=self._markers[makeri], color=self._colors[colori])
+            plt.plot(x_ord, data[:, -1], marker=self._markers[makeri], color=self._colors[colori], label=fn)
+        plt.legend()
+        plt.title('template compare')
+        plt.show()
+        return None
+
 
 def get_fig_title(filename='test.txt', layers=(-1,)):
     """
@@ -1951,5 +1887,5 @@ def get_fig_title(filename='test.txt', layers=(-1,)):
             for s in strs_last[:-1]:
                 out_str += s
         else:
-            out_str += strs[layer] + '-'
+            out_str += strs[layer] + '_'
     return out_str
