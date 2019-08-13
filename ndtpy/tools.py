@@ -1010,8 +1010,8 @@ def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
         maxQueue.append(i)
         if i - minQueue[0] >= k: minQueue.popleft()
         if i - maxQueue[0] >= k: maxQueue.popleft()
-        if i >= k - 1: retMin.append(data[minQueue[0]])
-        if i >= k - 1: retMax.append(data[maxQueue[0]])
+        retMin.append(data[minQueue[0]] if i >= k - 1 else data[i])
+        retMax.append(data[maxQueue[0]] if i >= k - 1 else data[i])
     return retMin, retMax
 
 
@@ -1395,22 +1395,38 @@ class DataMark:
 
 
 # Shine
+def split_root(root_data, path, tail='_result'):
+    filename_root = path[len(root_data) + 1:path.rfind('\\')]
+    filename = path.split('\\')[-1].split('.')[0]
+    filename_tail = '.' + path.split('.')[1]
+    result_root = root_data + tail + '\\' + filename_root
+    # print('filename_root:' + filename_root)
+    # print('filename:' + filename)
+    # print('filename_tail', filename_tail)
+    # print('result_root:' + result_root)
+    return filename, filename_root, result_root
 
 class GeneratePrivateModel:
     """
     根据校准点数据和公共模板，生成私有模板
 
     Author:   Shine Lin
-    Datetime: 2019/8/2 21:24
+    Datetime: 2019/8/9 21:42
 
     校准点规模为1 self.X Chanels，公共模板规模为 points self.X Chanels
     example:
-        MODEL = generate_private_model( model)
+        ways = 'int42'
+        MODEL = GeneratePrivateModel(model)
         pri_model, model, data_X, data = MODEL.generate_model(data,ways)
-        MODEL.plot_model(path[len(root)+1:])
-        其中pri_model是私有模板,model是处理后的公共模板,data为处理后的校准点数据，data_X为P的横坐标,
-        实参'app22','app32'为逼近型方法，’int42','int33'为插值型方法，不指定时默认为'int42'
-        调用MODEL.plot_model(path[len(root)+1:])可以画出对应的图，其中实参可略，为图的标题
+        MODEL.plot_model(root_Cali, path_Cali,title_Cali,title_Model)
+        MODEL.save_private_model(root_Cali,path_Cali)
+    解释：
+        其中pri_model是私有模板,model是处理后的公共模板,data为处理后的校准点数据，data_X为data的横坐标,；
+        ways为拟合方法，'app22','app32'为逼近型方法，’int42','int33'为插值型方法，不指定时默认为'int42'；
+        MODEL.plot_model(root_Cali, path_Cali,title_Cali,title_Model)为画图函数，
+        root_Cali, path_Cali分别为校准点的主目录和各个校准文件的目录，
+        title_Cali,title_Model分别为个标题，可省略；
+        MODEL.save_private_model(root_Cali,path_Cali)保存私有模板数据，保存在root_Cali之下。
     """
 
     def __init__(self, model):
@@ -1529,7 +1545,8 @@ class GeneratePrivateModel:
         self.data_X = np.arange(0, self.data.shape[0])
         for ch in range(0, self.model.shape[1]):
             self.data[:, ch] = self.data[:, ch] / np.max(np.max(self.data[:, ch])) * 1024
-            self.data_X[ch] = self.model[:, ch].argmax()
+            # self.data_X[ch] = self.model[:, ch].argmax()
+            self.data_X[ch] = np.argmin(abs(self.data[ch, ch] - self.model[:, ch]))
         # data_begin = self.model[0, :] + self.P[0, :] - self.model[self.X[0], :]
         # data_end = self.model[-1, :] + self.P[-1, :] - self.model[self.X[-1], :]
         # self.P = np.vstack([data_begin, self.P, data_end])
@@ -1540,27 +1557,42 @@ class GeneratePrivateModel:
         self.X = self.data_X
         self.subdivision()
         pri_model = self.find_axis(model_x)
-        # np.savetxt('private_model.txt', pri_model, '%d')
+        # np.savetxt('private_model.txt', self.pri_model, '%d')
         self.pri_model = pri_model
+        print('shape of private_model:')
+        print(self.pri_model.shape)
         return self.pri_model, self.model, self.data_X, self.data
 
-    def plot_model(self, titlename='good'):
-        plt.figure()
+    def plot_model(self,root_Cali, path_Cali, title_Cali='title_Cali',title_Model='title_model'):
+        fig,ax=plt.subplots((self.pri_model.shape[1]+1)//2,2,sharex='all',sharey='all',figsize=(20, 9))
+        ax=ax.flatten()
         coss = np.zeros(self.pri_model.shape[1])
+        plt.suptitle('title_Cali：'+title_Cali + '\n' +'title_Model：'+ title_Model + '\n' +'Ways：'+ self.ways, fontsize=18)
         for ch in range(self.pri_model.shape[1]):
-            plt.suptitle(titlename, fontsize=18)
-            plt.subplot(math.ceil(self.pri_model.shape[1] / 2), 2, ch + 1)
-            plt.title('CH' + str(ch))
-            plt.plot(self.pri_model[:, ch], 'r-*', markersize=4)
-            plt.plot(self.model[:, ch], 'b-o', markersize=4)
-            plt.plot(self.data_X, self.data[:, ch], 'ko', markersize=6)
+            ax[ch].set_title('CH' + str(ch+1),fontsize=14)
+            ax[ch].plot(self.pri_model[:, ch], 'r-*', markersize=4)
+            ax[ch].plot(self.model[:, ch], 'b-o', markersize=4)
+            ax[ch].plot(self.data_X, self.data[:, ch], 'ko', markersize=6)
             coss[ch] = round(np.dot(self.model[:, ch], self.pri_model[:, ch]) / (
                     np.linalg.norm(self.model[:, ch], ord=2, keepdims=False) *
                     np.linalg.norm(self.pri_model[:, ch], ord=2, keepdims=False)), 5)
-            plt.legend(['Pri_model', 'Pub_model', 'Cali_points'])
+            ax[ch].legend(['Pri_model', 'Pub_model', 'Cali_points'],fontsize=12)
         print('各个chanel的拟合度:')
         print(coss)
+        # plt.get_current_fig_manager().window.state('zoomed')
+        filename, filename_root, result_root = split_root(root_Cali, path_Cali, tail='_pri_model')
+        if not os.path.exists(result_root):
+            os.makedirs(result_root)
+        plt.savefig(result_root + '\\' + filename + '.png')
         plt.show()
+        plt.close()
+    
+    def save_private_model(self,root_Cali,path_Cali):
+        filename, filename_root, result_root=split_root(root_Cali, path_Cali, tail='_pri_model')
+        if not os.path.exists(result_root):
+            os.makedirs(result_root)
+        np.savetxt(result_root + '\\' + filename + '.txt', self.pri_model, fmt='%8.2f', delimiter='\t')
+        print('Save text succeed!')
 
 
 # Carry
@@ -1572,14 +1604,14 @@ class ExtractDotData:
     Carry Chen
 
     example:
-    save_folder = 'result_folder' 
+    save_folder = 'result_folder'
     edd = ExtractDotData()
     for fid,f in enumerate(list_all_files('打点数据文件夹'，['.txt'])):
         simple_file_name = get_fig_title(f,(-1,))
         rawdata = 你从file里面读出的rawdata, np.array, shape = N * chs
-        edd(rawdata, save_folder + '//' + simple_file_name + '.txt')
+        edd(rawdata, save_filename = save_folder + '//' + simple_file_name + '.txt',fig_name=simple_file_name)
     files = list_all_files(save_folder, ['.txt'])
-    edd.generate_mean_template(files, template_len=None)
+    edd.generate_public_template(files, template_len=None)
     """
     # 默认参数
     if True:
@@ -1675,7 +1707,7 @@ class ExtractDotData:
                 ff_point.append(i)
         return out_data, raw, bsl, force_flag, ff_point
 
-    def __call__(self, rawdata, fig_name=None, save_filename=None, filter_flag=True):
+    def __call__(self, rawdata, save_filename=None, fig_name=None, filter_flag=True):
         out_data, raw, bsl, force_flag, ff_point = self.__from_rawdata_to_matrix(rawdata)
         if filter_flag:
             out_data = butter_bandpass_filter(out_data)
@@ -1772,8 +1804,8 @@ class ExtractDotData:
                 template[:, ch] += np.interp(x * xp.shape[0] / template_len, xp, yp)
         return (template / np.max(template, axis=0) * 1024).astype(np.int)
 
-    def generate_template(self, files, template_filename=None, template_len=None,
-                          ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
+    def generate_public_template(self, files, template_filename=None, template_len=None,
+                                 ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
         """
         使用一系列的打点提取文件，生成公共模板
         :param files: 一系列打点提取之后的文件
