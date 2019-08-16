@@ -84,6 +84,12 @@ table of content:
 # Wayne:
 
 def func_timer(func):
+    """
+    用于计算函数执行时间
+    :param func:
+    :return:
+    """
+
     @functools.wraps(func)
     def wrapper(*args, **kw):
         start = time.time()
@@ -95,6 +101,12 @@ def func_timer(func):
 
 
 def maximize_figure(func):
+    """
+    用于最大化figure
+    :param func:
+    :return:
+    """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         ret = func(*args, **kwargs)
@@ -171,19 +183,19 @@ class GlobalHotKeys:
         self._include_defined_vks()
 
     @classmethod
-    def _include_defined_vks(self):
+    def _include_defined_vks(cls):
         for item in win32con.__dict__:
             item = str(item)
             if item[:3] == 'VK_':
-                setattr(self, item, win32con.__dict__[item])
+                setattr(cls, item, win32con.__dict__[item])
 
     @classmethod
-    def _include_alpha_numeric_vks(self):
+    def _include_alpha_numeric_vks(cls):
         for key_code in (list(range(ord('A'), ord('Z') + 1)) + list(range(ord('0'), ord('9') + 1))):
-            setattr(self, 'VK_' + chr(key_code), key_code)
+            setattr(cls, 'VK_' + chr(key_code), key_code)
 
     @classmethod
-    def register(self, vk, modifier=0, func=None):
+    def register(cls, vk, modifier=0, func=None):
         """
         vk is a windows virtual key code
          - can use ord('X') for A-Z, and 0-1 (note uppercase letter only)
@@ -198,40 +210,40 @@ class GlobalHotKeys:
         # Called as a decorator?
         if func is None:
             def register_decorator(f):
-                self.register(vk, modifier, f)
+                cls.register(vk, modifier, f)
                 return f
 
             return register_decorator
         else:
-            self.key_mapping.append((vk, modifier, func))
+            cls.key_mapping.append((vk, modifier, func))
 
     @classmethod
-    def listen(self):
+    def listen(cls):
         """
         Start the message pump
         """
 
-        for index, (vk, modifiers, func) in enumerate(self.key_mapping):
+        for index, (vk, modifiers, func) in enumerate(cls.key_mapping):
             # cmd 下没问题, 但是在服务中运行的时候抛出异常
-            if not self.user32.RegisterHotKey(None, index, modifiers, vk):
+            if not cls.user32.RegisterHotKey(None, index, modifiers, vk):
                 raise Exception('Unable to register hot key: ' + str(vk) + ' error code is: ' + str(
                     ctypes.windll.kernel32.GetLastError()))
 
         try:
             msg = ctypes.wintypes.MSG()
-            while self.user32.GetMessageA(ctypes.byref(msg), None, 0, 0) != 0:
+            while cls.user32.GetMessageA(ctypes.byref(msg), None, 0, 0) != 0:
                 if msg.message == win32con.WM_HOTKEY:
-                    (vk, modifiers, func) = self.key_mapping[msg.wParam]
+                    (vk, modifiers, func) = cls.key_mapping[msg.wParam]
                     if not func:
                         break
                     func()
 
-                self.user32.TranslateMessage(ctypes.byref(msg))
-                self.user32.DispatchMessageA(ctypes.byref(msg))
+                cls.user32.TranslateMessage(ctypes.byref(msg))
+                cls.user32.DispatchMessageA(ctypes.byref(msg))
 
         finally:
-            for index, (vk, modifiers, func) in enumerate(self.key_mapping):
-                self.user32.UnregisterHotKey(None, index)
+            for index, (vk, modifiers, func) in enumerate(cls.key_mapping):
+                cls.user32.UnregisterHotKey(None, index)
 
 
 class GuiOperation:
@@ -1406,6 +1418,7 @@ def split_root(root_data, path, tail='_result'):
     # print('result_root:' + result_root)
     return filename, filename_root, result_root
 
+
 class GeneratePrivateModel:
     """
     根据校准点数据和公共模板，生成私有模板
@@ -1563,20 +1576,21 @@ class GeneratePrivateModel:
         print(self.pri_model.shape)
         return self.pri_model, self.model, self.data_X, self.data
 
-    def plot_model(self,root_Cali, path_Cali, title_Cali='title_Cali',title_Model='title_model'):
-        fig,ax=plt.subplots((self.pri_model.shape[1]+1)//2,2,sharex='all',sharey='all',figsize=(20, 9))
-        ax=ax.flatten()
+    def plot_model(self, root_Cali, path_Cali, title_Cali='title_Cali', title_Model='title_model'):
+        fig, ax = plt.subplots((self.pri_model.shape[1] + 1) // 2, 2, sharex='all', sharey='all', figsize=(20, 9))
+        ax = ax.flatten()
         coss = np.zeros(self.pri_model.shape[1])
-        plt.suptitle('title_Cali：'+title_Cali + '\n' +'title_Model：'+ title_Model + '\n' +'Ways：'+ self.ways, fontsize=18)
+        plt.suptitle('title_Cali：' + title_Cali + '\n' + 'title_Model：' + title_Model + '\n' + 'Ways：' + self.ways,
+                     fontsize=18)
         for ch in range(self.pri_model.shape[1]):
-            ax[ch].set_title('CH' + str(ch+1),fontsize=14)
+            ax[ch].set_title('CH' + str(ch + 1), fontsize=14)
             ax[ch].plot(self.pri_model[:, ch], 'r-*', markersize=4)
             ax[ch].plot(self.model[:, ch], 'b-o', markersize=4)
             ax[ch].plot(self.data_X, self.data[:, ch], 'ko', markersize=6)
             coss[ch] = round(np.dot(self.model[:, ch], self.pri_model[:, ch]) / (
                     np.linalg.norm(self.model[:, ch], ord=2, keepdims=False) *
                     np.linalg.norm(self.pri_model[:, ch], ord=2, keepdims=False)), 5)
-            ax[ch].legend(['Pri_model', 'Pub_model', 'Cali_points'],fontsize=12)
+            ax[ch].legend(['Pri_model', 'Pub_model', 'Cali_points'], fontsize=12)
         print('各个chanel的拟合度:')
         print(coss)
         # plt.get_current_fig_manager().window.state('zoomed')
@@ -1586,9 +1600,9 @@ class GeneratePrivateModel:
         plt.savefig(result_root + '\\' + filename + '.png')
         plt.show()
         plt.close()
-    
-    def save_private_model(self,root_Cali,path_Cali):
-        filename, filename_root, result_root=split_root(root_Cali, path_Cali, tail='_pri_model')
+
+    def save_private_model(self, root_Cali, path_Cali):
+        filename, filename_root, result_root = split_root(root_Cali, path_Cali, tail='_pri_model')
         if not os.path.exists(result_root):
             os.makedirs(result_root)
         np.savetxt(result_root + '\\' + filename + '.txt', self.pri_model, fmt='%8.2f', delimiter='\t')
@@ -1610,8 +1624,12 @@ class ExtractDotData:
         simple_file_name = get_fig_title(f,(-1,))
         rawdata = 你从file里面读出的rawdata, np.array, shape = N * chs
         edd(rawdata, save_filename = save_folder + '//' + simple_file_name + '.txt',fig_name=simple_file_name)
+    # only when you want to generate public template
     files = list_all_files(save_folder, ['.txt'])
     edd.generate_public_template(files, template_len=None)
+    # only when you want compare some public tempalte in a same folder
+    files = list_all_files(template_folder, ['.txt'])
+    edd.read_and_compare_template(files)
     """
     # 默认参数
     if True:
@@ -1735,11 +1753,13 @@ class ExtractDotData:
         plt.suptitle(fig_name)
         plt.show()
         if save_filename is not None:
+            if not os.path.exists(save_folder):
+                os.makedirs(save_folder)
             np.savetxt(save_filename, out_data, fmt='%+6.1f', delimiter='\t')
             print(save_filename + ' file saved successfully')
         else:
             warnings.warn('warning message: filename not assigned, so not saved')
-        return
+        return out_data
 
     def __get_front_rear_points(self, data_norm, peak_pos, template_len, ratio, front_ch, rear_ch):
         """
@@ -1882,14 +1902,13 @@ class ExtractDotData:
         :param files:
         :return:
         """
-        peak_pos_default = 40
         for fid, file in enumerate(files):
             print(fid, file)
             with open(file, 'r', encoding='utf-8') as f:
                 fn = get_fig_title(file, (-1,))
                 data = np.array(pd.read_csv(f, header=None, skiprows=0, delimiter='\t'))
                 f.close()
-            zero_point = peak_pos_default - data[:, 3].argmax()
+            zero_point = -data[:, (data.shape[1] + 1) // 2].argmax()
             x_ord = np.arange(zero_point, zero_point + data.shape[0])
             colori = fid % len(self._colors)
             makeri = (fid * (len(self._markers) - 1) // len(self._markers)) % len(self._markers)
@@ -1921,3 +1940,6 @@ def get_fig_title(filename='test.txt', layers=(-1,)):
         else:
             out_str += strs[layer] + '_'
     return out_str
+
+
+
