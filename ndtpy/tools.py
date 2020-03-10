@@ -1,4 +1,5 @@
 import collections
+import configparser
 import ctypes
 import ctypes.wintypes
 import functools
@@ -52,18 +53,27 @@ try:
 except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
+try:
+    import pyperclip
+except ImportError:
+    logging.warn('Try pip install pyperclip')
 
 from scipy import signal
 
 """
 table of content:
-1. Useful tools:
+1. Decorator:
     a. (decorator) func_timer
     b. (decorator) maximize_figure
-    c. (function) list_all_files
-    d. (class) GlobalHotKeys
-    e. (class) GuiOperation
-2. Data processing:
+2. DataStructure:
+    a. (class) ConditionTree
+    b. (class) UnionFind
+3. Useful tools:
+    a. (function) list_all_files
+    b. (class) GlobalHotKeys
+    c. (class) GuiOperation
+    d. (class) XmlIO
+4. Data processing:
     a. (function) peak_det
     b. (function) butter_bandpass_filter
     c. (class) FindLocalExtremeValue
@@ -71,13 +81,12 @@ table of content:
     e. (class) ExtractRollingData
     f. (class) CurveSimilarity
     g. (function) find_extreme_value_in_sliding_window
-3. mathematics:
+    h. (function) get_model_from_rawdata
+5. mathematics:
     a. (function) find_all_non_negative_integer_solutions
     b. (function) get_all_factors
     c. (function) digit_counts
-4. DataStructure:
-    a. (class) ConditionTree
-    b. (class) XmlIO
+    d. (function) karatsuba_multiplication
 """
 
 
@@ -114,6 +123,155 @@ def maximize_figure(func):
         return ret
 
     return wrapper
+
+
+class ConditionTree:
+    """
+    逻辑条件树，用来存储逻辑关系的树
+
+    Author:   wangye
+    Datetime: 2019/7/31 16:17
+    """
+
+    def __init__(self, tag: str):
+        self.tag = tag
+        self.children = []
+        self.attribute = dict()
+        self.text = ''
+
+    def append_by_path(self, path: list):
+        """
+        从路径导入
+        :param path:
+        :return:
+        """
+        if not path: return
+        p = path[0]
+        for ch in self.children:
+            if p['tag'] == ch.tag:
+                ch.append_by_path(path[1:])
+                return
+        child = ConditionTree(p['tag'])
+        child.attribute = p['attrib']
+        child.text = p['text']
+        self.children.append(child)
+        self.children[-1].append_by_path(path[1:])
+
+    def find(self, nick_name: str) -> 'ConditionTree':
+        if not self.children: return None
+        for ch in self.children:
+            if ch.tag == nick_name:
+                return ch
+            res = ch.find(nick_name)
+            if res: return res
+        return None
+
+    def find_by_path(self, path: list) -> 'ConditionTree':
+        cur = self
+        while path:
+            p = path.pop(0)
+            for ch in cur.children:
+                if p == ch.tag:
+                    cur = ch
+                    if not path:
+                        return cur
+                    break
+            else:
+                return None
+
+    def print_path(self):
+        def helper(_tree):
+            if not _tree: return []
+            if not _tree.children and _tree.text:
+                return [[_tree.tag + ': ' + _tree.text]]
+            return [[_tree.tag] + res for ch in _tree.children for res in helper(ch)]
+
+        print('-*-*-*-*-*-*- start print tree -*-*-*-*-*-*-')
+        [print(' -> '.join(h)) for h in helper(self)]
+        print('-*-*-*-*-*-*- end print tree -*-*-*-*-*-*-')
+
+
+class UnionFind:
+    """An implementation of union find data structure.
+    It uses weighted quick union by rank with path compression.
+
+    This module implements an union find or disjoint set data structure.
+
+    An union find data structure can keep track of a set of elements into a number
+    of disjoint (non overlapping) subsets. That is why it is also known as the
+    disjoint set data structure. Mainly two useful operations on such a data
+    structure can be performed. A *find* operation determines which subset a
+    particular element is in. This can be used for determining if two
+    elements are in the same subset. An *union* Join two subsets into a
+    single subset.
+
+    The complexity of these two operations depend on the particular implementation.
+    It is possible to achieve constant time (O(1)) for any one of those operations
+    while the operation is penalized. A balance between the complexities of these
+    two operations is desirable and achievable following two enhancements:
+
+    1.  Using union by rank -- always attach the smaller tree to the root of the
+        larger tree.
+    2.  Using path compression -- flattening the structure of the tree whenever
+        find is used on it.
+    """
+
+    def __init__(self, N):
+        """Initialize an empty union find object with N items.
+
+        Args:
+            N: Number of items in the union find object.
+        """
+
+        self._id = list(range(N))
+        self._count = N
+        self._rank = [0] * N
+
+    def find(self, p):
+        """Find the set identifier for the item p."""
+
+        id = self._id
+        while p != id[p]:
+            p = id[p] = id[id[p]]  # Path compression using halving.
+        return p
+
+    def count(self):
+        """Return the number of items."""
+
+        return self._count
+
+    def connected(self, p, q):
+        """Check if the items p and q are on the same set or not."""
+
+        return self.find(p) == self.find(q)
+
+    def union(self, p, q):
+        """Combine sets containing p and q into a single set."""
+
+        id = self._id
+        rank = self._rank
+
+        i = self.find(p)
+        j = self.find(q)
+        if i == j:
+            return
+
+        self._count -= 1
+        if rank[i] < rank[j]:
+            id[i] = j
+        elif rank[i] > rank[j]:
+            id[j] = i
+        else:
+            id[j] = i
+            rank[i] += 1
+
+    def __str__(self):
+        """String representation of the union find object."""
+        return " ".join([str(x) for x in self._id])
+
+    def __repr__(self):
+        """Representation of the union find object."""
+        return "UF(" + str(self) + ")"
 
 
 def list_all_files(root: str, keys=[], outliers=[], full_path=False):
@@ -254,7 +412,7 @@ class GuiOperation:
     Datetime: 2019/5/18 22:00
 
     example:
-        gui = GuiOperation()
+    gui = GuiOperation()
     notepad = gui.find_window('tt')[0]
     gui.bring_to_top(notepad)
     time.sleep(2)
@@ -346,6 +504,68 @@ class GuiOperation:
 
     def change_window_name(self, hwnd, new_name):
         win32api.SendMessage(hwnd, win32con.WM_SETTEXT, 0, new_name)
+
+
+class XmlIO:
+    """
+    用于xml文件的读取，返回ConditionTree数据结构
+
+    Author:   wangye
+    Datetime: 2019/7/31 16:24
+    """
+
+    def __init__(self, file_read='', file_write=''):
+        self.file_read = file_read
+        self.file_write = file_write
+
+    def read(self) -> ConditionTree:
+        tree = ET.parse(self.file_read)
+        root = tree.getroot()
+
+        def helper(_tree: ET.Element, _is_root=True):
+            if not _tree: return [[{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]]
+            ret = [] if _is_root else [{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]
+            return [ret + res for ch in _tree for res in helper(ch, False)]
+
+        c_tree = ConditionTree(root.tag)
+        c_tree.attribute = root.attrib
+        c_tree.text = root.text.strip('\t\n')
+        [c_tree.append_by_path(p) for p in helper(root)]
+        # c_tree.print_path()
+        return c_tree
+
+    def write(self, root_name, tree: ConditionTree):
+        _tree = ET.ElementTree()
+        _root = ET.Element(root_name)
+        _tree._setroot(_root)
+
+        def helper(etree, c_tree):
+            if not c_tree.children and c_tree.kvp:
+                for k, v in c_tree.kvp.items():
+                    ET.SubElement(etree, k).text = v
+            else:
+                for ch in c_tree.children:
+                    son = ET.SubElement(etree, ch.tag)
+                    helper(son, ch)
+
+        helper(_root, tree)
+        self._indent(_root)
+        _tree.write(self.file_write, 'utf-8', True)
+
+    def _indent(self, elem, level=0):
+        i = "\n" + level * "\t"
+        if len(elem):
+            if not elem.text or not elem.text.strip():
+                elem.text = i + "\t"
+            if not elem.tail or not elem.tail.strip():
+                elem.tail = i
+            for elem in elem:
+                self._indent(elem, level + 1)
+            if not elem.tail or not elem.tail.strip():
+                elem.tail = i
+        else:
+            if level and (not elem.tail or not elem.tail.strip()):
+                elem.tail = i
 
 
 def peak_det(v, delta, x=None):
@@ -566,10 +786,12 @@ class DataProcessing:
         self.filename = filename
         self.base = data
         self.force_signal = np.zeros_like(data)
+        self.force_val = np.zeros_like(data)
         self.energy = None
         self.flag = None
         self.force = None
         self.tds = None
+        self.tus = None
         self.energy_peak = None
         self.energy_valley = None
         self.limiting_thd = 1000
@@ -733,6 +955,7 @@ class DataProcessing:
     @func_timer
     def calc_force(self):
         self.tds = np.array(np.where(np.diff(self.flag) == 1))[0]
+        self.tus = np.array(np.where(np.diff(self.flag) == -1))[0]
         if np.ndim(self.force_signal) == 1:
             self.force_signal = self.force_signal[:, np.newaxis]
         params = np.zeros((self.force_signal.shape[1], self.tds.shape[0]))
@@ -743,6 +966,15 @@ class DataProcessing:
                 self.force_signal[self.tds[ii] - self.bef - self.avg:self.tds[ii] - self.bef, :], 0
             )
         self.force = params.T
+
+    @func_timer
+    def calc_force_value(self):
+        self.tds = np.array(np.where(np.diff(self.flag) == 1))[0]
+        if np.ndim(self.force_signal) == 1:
+            self.force_signal = self.force_signal[:, np.newaxis]
+        self.force_val = np.zeros_like(self.force_signal)
+        for ii in range(self.tus.shape[0]):
+            self.force_val[self.tds[ii]:self.tus[ii]] = self.force_signal[self.tds[ii]:self.tus[ii]]
 
 
 class ExtractRollingData:
@@ -1027,6 +1259,31 @@ def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
     return retMin, retMax
 
 
+def get_model_from_rawdata(data, num_model_points=100, margin_peak_ratio=0.33):
+    """
+    从给定的m*n(n为通道数)的数据中，提取指定数量长度的模板，模板边界由边峰比决定
+    :param data: m*n数据
+    :param num_model_points: 模型长度 
+    :param margin_peak_ratio: 边峰比
+    :return: 模型
+    example:
+    model = get_model_from_rawdata(rawdata, 50, 0.4)
+    """
+    # normalization
+    data_peak = data.max(0)
+    # data /= data_peak
+    data = data / data_peak
+    data = data[data.max(1) > margin_peak_ratio]
+    model = np.apply_along_axis(
+        lambda x: np.interp(np.linspace(0, data.shape[0], num_model_points),
+                            np.arange(data.shape[0]),
+                            x),
+        0, data
+    )
+    model *= data_peak
+    return model
+
+
 def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
     """
     求解所有满足x1+x2+...+x{num_vars}=const_sum的非负整数解
@@ -1095,132 +1352,46 @@ def digitCount(n, k):
     return ret
 
 
-class ConditionTree:
-    """
-    逻辑条件树，用来存储逻辑关系的树
+def karatsuba_multiplication(x, y):
+    """Multiply two integers using Karatsuba's algorithm."""
 
-    Author:   wangye
-    Datetime: 2019/7/31 16:17
-    """
-
-    def __init__(self, tag: str):
-        self.tag = tag
-        self.children = []
-        self.attribute = dict()
-        self.text = ''
-
-    def append_by_path(self, path: list):
-        """
-        从路径导入
-        :param path:
-        :return:
-        """
-        if not path: return
-        p = path[0]
-        for ch in self.children:
-            if p['tag'] == ch.tag:
-                ch.append_by_path(path[1:])
-                return
-        child = ConditionTree(p['tag'])
-        child.attribute = p['attrib']
-        child.text = p['text']
-        self.children.append(child)
-        self.children[-1].append_by_path(path[1:])
-
-    def find(self, nick_name: str) -> 'ConditionTree':
-        if not self.children: return None
-        for ch in self.children:
-            if ch.tag == nick_name:
-                return ch
-            res = ch.find(nick_name)
-            if res: return res
-        return None
-
-    def find_by_path(self, path: list) -> 'ConditionTree':
-        cur = self
-        while path:
-            p = path.pop(0)
-            for ch in cur.children:
-                if p == ch.tag:
-                    cur = ch
-                    if not path:
-                        return cur
-                    break
+    # convert to strings for easy access to digits
+    def zero_pad(number_string, zeros, left=True):
+        """Return the string with zeros added to the left or right."""
+        for i in range(zeros):
+            if left:
+                number_string = '0' + number_string
             else:
-                return None
+                number_string = number_string + '0'
+        return number_string
 
-    def print_path(self):
-        def helper(_tree):
-            if not _tree: return []
-            if not _tree.children and _tree.text:
-                return [[_tree.tag + ': ' + _tree.text]]
-            return [[_tree.tag] + res for ch in _tree.children for res in helper(ch)]
-
-        print('-*-*-*-*-*-*- start print tree -*-*-*-*-*-*-')
-        [print(' -> '.join(h)) for h in helper(self)]
-        print('-*-*-*-*-*-*- end print tree -*-*-*-*-*-*-')
-
-
-class XmlIO:
-    """
-    用于xml文件的读取，返回ConditionTree数据结构
-
-    Author:   wangye
-    Datetime: 2019/7/31 16:24
-    """
-
-    def __init__(self, file_read='', file_write=''):
-        self.file_read = file_read
-        self.file_write = file_write
-
-    def read(self) -> ConditionTree:
-        tree = ET.parse(self.file_read)
-        root = tree.getroot()
-
-        def helper(_tree: ET.Element, _is_root=True):
-            if not _tree: return [[{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]]
-            ret = [] if _is_root else [{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]
-            return [ret + res for ch in _tree for res in helper(ch, False)]
-
-        c_tree = ConditionTree(root.tag)
-        c_tree.attribute = root.attrib
-        c_tree.text = root.text.strip('\t\n')
-        [c_tree.append_by_path(p) for p in helper(root)]
-        # c_tree.print_path()
-        return c_tree
-
-    def write(self, root_name, tree: ConditionTree):
-        _tree = ET.ElementTree()
-        _root = ET.Element(root_name)
-        _tree._setroot(_root)
-
-        def helper(etree, c_tree):
-            if not c_tree.children and c_tree.kvp:
-                for k, v in c_tree.kvp.items():
-                    ET.SubElement(etree, k).text = v
-            else:
-                for ch in c_tree.children:
-                    son = ET.SubElement(etree, ch.tag)
-                    helper(son, ch)
-
-        helper(_root, tree)
-        self._indent(_root)
-        _tree.write(self.file_write, 'utf-8', True)
-
-    def _indent(self, elem, level=0):
-        i = "\n" + level * "\t"
-        if len(elem):
-            if not elem.text or not elem.text.strip():
-                elem.text = i + "\t"
-            if not elem.tail or not elem.tail.strip():
-                elem.tail = i
-            for elem in elem:
-                self._indent(elem, level + 1)
-            if not elem.tail or not elem.tail.strip():
-                elem.tail = i
-        else:
-            if level and (not elem.tail or not elem.tail.strip()):
-                elem.tail = i
+    x = str(x)
+    y = str(y)
+    # base case for recursion
+    if len(x) == 1 and len(y) == 1:
+        return int(x) * int(y)
+    if len(x) < len(y):
+        x = zero_pad(x, len(y) - len(x))
+    elif len(y) < len(x):
+        y = zero_pad(y, len(x) - len(y))
+    n = len(x)
+    j = n // 2
+    # for odd digit integers
+    if (n % 2) != 0:
+        j += 1
+    BZeroPadding = n - j
+    AZeroPadding = BZeroPadding * 2
+    a = int(x[:j])
+    b = int(x[j:])
+    c = int(y[:j])
+    d = int(y[j:])
+    # recursively calculate
+    ac = karatsuba_multiplication(a, c)
+    bd = karatsuba_multiplication(b, d)
+    k = karatsuba_multiplication(a + b, c + d)
+    A = int(zero_pad(str(ac), AZeroPadding, False))
+    B = int(zero_pad(str(k - ac - bd), BZeroPadding, False))
+    return A + B + bd
 
 
 # Leon:
@@ -1407,15 +1578,13 @@ class DataMark:
 
 
 # Shine
-def split_root(root_data, path, tail='_result'):
-    filename_root = path[len(root_data) + 1:path.rfind('\\')]
-    filename = path.split('\\')[-1].split('.')[0]
-    filename_tail = '.' + path.split('.')[1]
-    result_root = root_data + tail + '\\' + filename_root
-    # print('filename_root:' + filename_root)
-    # print('filename:' + filename)
-    # print('filename_tail', filename_tail)
-    # print('result_root:' + result_root)
+def split_root(root, path, tail='_OUTPOINT'):
+    path_split = path.split('\\')
+    root_split = root.split('\\')
+    path_split[len(root_split) - 1] = path_split[len(root_split) - 1] + tail
+    result_root = '\\'.join(path_split[:-1])
+    filename_root = result_root
+    filename = path_split[-1].split('.')[0]
     return filename, filename_root, result_root
 
 
@@ -1430,15 +1599,15 @@ class GeneratePrivateModel:
     example:
         ways = 'int42'
         MODEL = GeneratePrivateModel(model)
-        pri_model, model, data_X, data = MODEL.generate_model(data,ways)
+        pri_model, model, data_X, data = MODEL.generate_model(data,ways,400)
         MODEL.plot_model(root_Cali, path_Cali,title_Cali,title_Model)
         MODEL.save_private_model(root_Cali,path_Cali)
     解释：
-        其中pri_model是私有模板,model是处理后的公共模板,data为处理后的校准点数据，data_X为data的横坐标,；
+        其中pri_model是私有模板,model是处理后的公共模板,data（ch*ch）校准点数据，默认校准砝码400g，data_X为data的横坐标；
         ways为拟合方法，'app22','app32'为逼近型方法，’int42','int33'为插值型方法，不指定时默认为'int42'；
         MODEL.plot_model(root_Cali, path_Cali,title_Cali,title_Model)为画图函数，
         root_Cali, path_Cali分别为校准点的主目录和各个校准文件的目录，
-        title_Cali,title_Model分别为个标题，可省略；
+        title_Cali,title_Model分别为各个对应的标题，可省略；
         MODEL.save_private_model(root_Cali,path_Cali)保存私有模板数据，保存在root_Cali之下。
     """
 
@@ -1446,21 +1615,27 @@ class GeneratePrivateModel:
         self.model = model
         self.iterations = 9
         self.ways = 'int42'
-        # 拟合型app22,app32
-        # 逼近型int42,int33
+        self.chanels = model.shape[1]
+        self.colors = ['r', 'b', 'g', 'orange', 'pink', 'purple', 'gray', 'k', 'skyblue', 'darkgoldenrod', 'c']
+        self.fonts = {'family': 'serif',
+                      'style': 'normal',
+                      'weight': 'bold',
+                      'color': 'black',
+                      'size': 10
+                      }
 
     def model_process(self):
         # 剔除首末小于50%的顶点
+        ch_min = np.argmin(np.argmax(self.model, axis=0))
+        ch_max = np.argmax(np.argmax(self.model, axis=0))
         for num_point in range(0, self.model.shape[0]):
-            if self.model[num_point, 0] >= np.max(self.model[num_point, 0]) / 2:
+            if self.model[num_point, ch_min] >= np.max(self.model[:, ch_min]) / 2:
                 [model0, self.model] = np.split(self.model, [num_point], axis=0)
                 break
         for num_point in range(0, self.model.shape[0])[::-1]:
-            if self.model[num_point, self.model.shape[1] - 1] >= np.max(
-                    self.model[num_point, self.model.shape[1] - 1]) / 2:
+            if self.model[num_point, ch_max] >= np.max(self.model[:, ch_max]) / 2:
                 [self.model, model1] = np.split(self.model, [num_point + 1], axis=0)
                 break
-        return self.model
 
     def subdivision(self):
         if self.ways == 'app22':
@@ -1544,20 +1719,21 @@ class GeneratePrivateModel:
             pri_model[i] = self.P[pri_model_x[i], :]
         return pri_model
 
-    def generate_model(self, data, ways='int42', model_door=True, iterations=9):
+    def generate_model(self, data, ways='int42', Cali_weight=400, model_door=True, iterations=9):
         self.iterations = iterations
         self.ways = ways
         self.data = data
-        for ch in range(0, self.model.shape[1]):
-            self.model[:, ch] = self.model[:, ch] / np.max(np.max(self.model[:, ch])) * 1024
+        self.Coef = Cali_weight / np.max(self.data, axis=0)
+        for ch in range(0, self.chanels):
+            self.model[:, ch] = self.model[:, ch] / np.max(np.max(self.model[:, ch])) * 1000
         if model_door:
             # 剔除首末小于50%的顶点
-            self.model = self.model_process()
+            self.model_process()
             self.model = butter_bandpass_filter(self.model)
         model_x = np.arange(0, self.model.shape[0])
         self.data_X = np.arange(0, self.data.shape[0])
-        for ch in range(0, self.model.shape[1]):
-            self.data[:, ch] = self.data[:, ch] / np.max(np.max(self.data[:, ch])) * 1024
+        for ch in range(0, self.chanels):
+            self.data[:, ch] = self.data[:, ch] / np.max(np.max(self.data[:, ch])) * 1000
             # self.data_X[ch] = self.model[:, ch].argmax()
             self.data_X[ch] = np.argmin(abs(self.data[ch, ch] - self.model[:, ch]))
         # data_begin = self.model[0, :] + self.P[0, :] - self.model[self.X[0], :]
@@ -1569,21 +1745,21 @@ class GeneratePrivateModel:
         self.P = self.data
         self.X = self.data_X
         self.subdivision()
-        pri_model = self.find_axis(model_x)
-        # np.savetxt('private_model.txt', self.pri_model, '%d')
-        self.pri_model = pri_model
+        self.pri_model = self.find_axis(model_x)
         print('shape of private_model:')
         print(self.pri_model.shape)
         return self.pri_model, self.model, self.data_X, self.data
 
     def plot_model(self, root_Cali, path_Cali, title_Cali='title_Cali', title_Model='title_model'):
-        fig, ax = plt.subplots((self.pri_model.shape[1] + 1) // 2, 2, sharex='all', sharey='all', figsize=(20, 9))
+        fig, ax = plt.subplots((self.chanels + 1) // 2, 2, sharex='all', sharey='all', figsize=(20, 9))
         ax = ax.flatten()
-        coss = np.zeros(self.pri_model.shape[1])
+        coss = np.zeros(self.chanels)
         plt.suptitle('title_Cali：' + title_Cali + '\n' + 'title_Model：' + title_Model + '\n' + 'Ways：' + self.ways,
                      fontsize=18)
-        for ch in range(self.pri_model.shape[1]):
-            ax[ch].set_title('CH' + str(ch + 1), fontsize=14)
+        CH_label = ['CH' + str(i) for i in range(1, self.chanels + 1)]
+        legend_name = ['Pri_model', 'Pub_model', 'Cali_points']
+        for ch in range(self.chanels):
+            ax[ch].set_title(CH_label[ch], fontsize=14)
             ax[ch].plot(self.pri_model[:, ch], 'r-*', markersize=4)
             ax[ch].plot(self.model[:, ch], 'b-o', markersize=4)
             ax[ch].plot(self.data_X, self.data[:, ch], 'ko', markersize=6)
@@ -1591,6 +1767,7 @@ class GeneratePrivateModel:
                     np.linalg.norm(self.model[:, ch], ord=2, keepdims=False) *
                     np.linalg.norm(self.pri_model[:, ch], ord=2, keepdims=False)), 5)
             ax[ch].legend(['Pri_model', 'Pub_model', 'Cali_points'], fontsize=12)
+
         print('各个chanel的拟合度:')
         print(coss)
         # plt.get_current_fig_manager().window.state('zoomed')
@@ -1598,6 +1775,42 @@ class GeneratePrivateModel:
         if not os.path.exists(result_root):
             os.makedirs(result_root)
         plt.savefig(result_root + '\\' + filename + '.png')
+        print('Save picture succeed!')
+        print(result_root + '\\' + filename + '.png')
+        # plt.show()
+        # plt.close()
+
+        force_max_index = np.array(np.argmax(self.pri_model, axis=0), dtype=int)
+        force_max = np.array(np.max(self.pri_model, axis=0), dtype=int)
+        xticks = np.concatenate((np.array([0]), force_max_index, np.array([self.pri_model.shape[0] - 1])), axis=0)
+        force_max_half = []
+        for ch in range(self.chanels):
+            counts = 0
+            for x in self.pri_model[:, ch]:
+                if x >= force_max[ch] / 2:
+                    counts = counts + 1
+            force_max_half.append(counts)
+        plt.figure(figsize=(16, 9))
+        for ch in range(self.chanels):
+            plt.plot(self.pri_model[:, ch], '-o', markersize=4)
+        plt.plot(force_max_index, force_max, 'k*', markersize=10)
+        plt.title(filename + '_All Chanels', fontsize=14)
+        CH_label.append('(Coef,Width)')
+        plt.legend(CH_label, fontsize=10, loc='lower right')
+        plt.xticks(xticks, size=16)
+        plt.xlabel('Position', fontsize=16)
+        plt.ylabel('ADC', fontsize=20)
+        for ch in range(self.chanels):
+            if force_max[ch] > 30:
+                text_value = '(' + str(np.round(self.Coef, 2)[ch]) + ',' + str(force_max_half[ch]) + ')'
+                plt.text(force_max_index[ch], force_max[ch] * 1.02, text_value, fontdict=self.fonts)
+                plt.vlines(force_max_index[ch], np.min(self.pri_model[force_max_index[ch]]),
+                           np.max(self.pri_model[force_max_index[ch]]), color='k', linestyle='--')
+        plt.hlines(0, 0, self.pri_model.shape[0] - 1, color='k')
+        plt.grid()
+        plt.savefig(result_root + '\\' + filename + '_One' + '.png')
+        print('Save picture succeed!')
+        print(result_root + '\\' + filename + '_One' + '.png')
         plt.show()
         plt.close()
 
@@ -1607,6 +1820,7 @@ class GeneratePrivateModel:
             os.makedirs(result_root)
         np.savetxt(result_root + '\\' + filename + '.txt', self.pri_model, fmt='%8.2f', delimiter='\t')
         print('Save text succeed!')
+        print(result_root + '\\' + filename + '.txt')
 
 
 # Carry
@@ -1659,7 +1873,8 @@ class ExtractDotData:
     def __init__(self, alpha=_alpha, limit=_limit,
                  trigger_th=_trigger_th, slope_th=_slope_th, leave_ratio_th=_leave_ratio_th,
                  leave_cnt_th=_leave_cnt_th, touch_cnt_th=_touch_cnt_th,
-                 base_index=_base_index, data_index=_data_index, chose_index=_chose_index):
+                 base_index=_base_index, data_index=_data_index, chose_index=_chose_index,
+                 negative_forceflag=False):
         self.__skip_frame = 100
         self.alpha = alpha
         self.limit = limit
@@ -1671,6 +1886,7 @@ class ExtractDotData:
         self.base_index = base_index
         self.data_index = data_index
         self.chose_index = chose_index
+        self.negative_forceflag = negative_forceflag
 
     def __from_rawdata_to_matrix(self, rawdata):
         """
@@ -1694,6 +1910,7 @@ class ExtractDotData:
             force_flag[i] = force_flag[i - 1]
             sig = raw[i] - bsl[i - 1]
             maxch = np.argmax(sig, axis=0)
+            minch = np.argmin(sig, axis=0)
             if force_flag[i - 1] == 0:
                 delta = raw[i] - bsl[i - 1]
                 leave_cnt += 1
@@ -1706,17 +1923,52 @@ class ExtractDotData:
                     last_maxch = maxch
                     peak = sig[last_maxch]
                     touch_cnt = 0
-            else:
+                elif (((raw[i, minch] - raw[i - 1, minch] < -self.slope_th) or
+                       (raw[i - 1, minch] - raw[i - 2, minch] < - self.slope_th)) and \
+                      sig[minch] < -self.trigger_th and leave_cnt > self.leave_cnt_th) \
+                        and self.negative_forceflag:  # force_flag trigger
+                    force_flag[i] = 2
+                    last_maxch = minch
+                    peak = sig[minch]
+                    touch_cnt = 0
+            elif force_flag[i - 1] == 1:
                 bsl[i] = bsl[i - 1] + 0
                 touch_cnt += 1
                 if sig[maxch] > peak:
                     peak = sig[maxch]
                     last_maxch = maxch
+                if sig[minch] < -peak and self.negative_forceflag == True:
+                    peak = sig[minch]
+                    last_maxch = minch
+                    force_flag[i] = 2
                 if sig[last_maxch] < self.leave_ratio_th * peak and raw[i, last_maxch] > raw[i - 2, last_maxch] \
                         and touch_cnt > self.touch_cnt_th:
                     force_flag[i] = 0
                     leave_cnt = 0
+                    bsl[i] = rawdata[i] + 0
+            elif force_flag[i - 1] == 2 and self.negative_forceflag:
+                bsl[i] = bsl[i - 1] + 0
+                touch_cnt += 1
+                if sig[minch] < peak:
+                    peak = sig[minch]
+                    last_maxch = minch
+                if sig[maxch] > -peak:
+                    peak = sig[maxch]
+                    last_maxch = maxch
+                    force_flag[i] = 1
+                if sig[last_maxch] > self.leave_ratio_th * peak and raw[i, last_maxch] < raw[i - 2, last_maxch] \
+                        and touch_cnt > self.touch_cnt_th:
+                    force_flag[i] = 0
+                    leave_cnt = 0
+                    bsl[i] = rawdata[i] + 0
             if force_flag[i - 1] == 0 and force_flag[i] == 1:
+                base = np.sort(raw[i + self.base_index[0]:i + self.base_index[1]], axis=0)
+                data = np.sort(raw[i + self.data_index[0]:i + self.data_index[1]], axis=0)
+                base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
+                data = np.mean(data[self.chose_index[0]:self.chose_index[1]], axis=0)
+                out_data = np.r_[out_data, np.reshape(data - base, (1, CHS))]
+                ff_point.append(i)
+            elif force_flag[i - 1] == 0 and force_flag[i] == 2 and self.negative_forceflag:
                 base = np.sort(raw[i + self.base_index[0]:i + self.base_index[1]], axis=0)
                 data = np.sort(raw[i + self.data_index[0]:i + self.data_index[1]], axis=0)
                 base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
@@ -1725,40 +1977,45 @@ class ExtractDotData:
                 ff_point.append(i)
         return out_data, raw, bsl, force_flag, ff_point
 
-    def __call__(self, rawdata, save_filename=None, fig_name=None, filter_flag=True):
+    def __call__(self, rawdata, save_filename=None, fig_name=None, filter_flag=True, savefig=False):
         out_data, raw, bsl, force_flag, ff_point = self.__from_rawdata_to_matrix(rawdata)
         if filter_flag:
             out_data = butter_bandpass_filter(out_data)
         print('out_data shape: ', out_data.shape)
         CHS = out_data.shape[1]
         figM = (CHS + 1) // 2
-        plt.figure(1)
+        fig, ax = plt.subplots(figM, 2, sharex='all')
+        ax = ax.flatten()
         for ch in range(CHS):
-            plt.subplot(figM, 2, ch + 1)
-            plt.plot(raw[:, ch], label='raw')
-            plt.plot(bsl[:, ch], label='baseline')
-            plt.plot(raw[0, ch] + force_flag * 100, label='forceflag')
+            ax[ch].plot(raw[:, ch], label='raw')
+            ax[ch].plot(bsl[:, ch], label='baseline')
+            ax[ch].plot(raw[0, ch] + force_flag * 100, label='forceflag')
             for i in ff_point:
-                plt.plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
-                         raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
-                plt.plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
-                         raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
-            plt.legend()
-            plt.title('CH' + str(ch + 1))
+                ax[ch].plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
+                            raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
+                ax[ch].plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
+                            raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
+            ax[ch].legend()
+            ax[ch].set_title('CH' + str(ch + 1))
         plt.suptitle(fig_name)
-        plt.figure(2)
-        plt.plot(out_data, '-o')
-        plt.ylabel('ADC')
-        plt.grid(True)
+        plt.savefig(save_filename[:-4] + '-raw.jpg') if savefig else None
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(out_data, '-o')
+        ax.legend(tuple(('CH' + str(ch + 1) for ch in range(out_data.shape[1]))))
+        ax.set_ylabel('ADC')
+        ax.grid(True)
         plt.suptitle(fig_name)
-        plt.show()
         if save_filename is not None:
+            save_folder = os.path.dirname(save_filename)
             if not os.path.exists(save_folder):
                 os.makedirs(save_folder)
+                print(save_filename + ' is created')
             np.savetxt(save_filename, out_data, fmt='%+6.1f', delimiter='\t')
             print(save_filename + ' file saved successfully')
+            plt.savefig(save_filename[:-4] + '-dot.jpg') if savefig else None
         else:
             warnings.warn('warning message: filename not assigned, so not saved')
+        plt.show()
         return out_data
 
     def __get_front_rear_points(self, data_norm, peak_pos, template_len, ratio, front_ch, rear_ch):
@@ -1775,7 +2032,7 @@ class ExtractDotData:
         """
         if isinstance(template_len, int):  # 优先使用 template_len
             for front_points in range(data_norm.shape[0]):
-                rear_points = template_len - (peak_pos[rear_ch] - peak_pos[front_ch]) - front_points
+                rear_points = template_len - (peak_pos[rear_ch] - peak_pos[front_ch]) - front_points - 1
                 if rear_points + peak_pos[rear_ch] >= data_norm.shape[0] or \
                         peak_pos[front_ch] - front_points >= peak_pos[0]:
                     continue
@@ -1783,22 +2040,22 @@ class ExtractDotData:
                         data_norm[peak_pos[rear_ch] + rear_points, -1]:
                     print('template_len:', template_len, ', front_points:', front_points - 1, ', rear_points:',
                           rear_points)
-                    return template_len, front_points - 1, rear_points + 1
+                    return template_len, front_points, rear_points
             print('error: template_len=', template_len, ', 但数据没有这么长')
             exit()
         else:  # 然后使用ratio
             front_points = peak_pos[0]
             for i in range(peak_pos[0]):
                 if data_norm[peak_pos[0] - i, 0] < data_norm[peak_pos[0], 0] * ratio:
-                    front_points = i - 2
+                    front_points = i
                     break
-            rear_points = data_norm.shape[0] - peak_pos[1]
+            rear_points = data_norm.shape[0] - peak_pos[-1] - 1
             for i in range(data_norm.shape[0] - peak_pos[-1]):
                 if data_norm[peak_pos[-1] + i, -1] < data_norm[peak_pos[-1], -1] * ratio:
                     rear_points = i + 1
                     break
-            template_len = peak_pos[-1] - peak_pos[0] + rear_points + front_points
-            print('template_len:', template_len, ', front_points:', front_points, ', rear_points:', rear_points - 1)
+            template_len = peak_pos[-1] - peak_pos[0] + rear_points + front_points - 1
+            print('template_len:', template_len, ', front_points:', front_points, ', rear_points:', rear_points)
             return template_len, front_points, rear_points
 
     def __get_mean_tempalte(self, data_list, peak_poses, template_len, front_points, rear_points, front_ch, rear_ch):
@@ -1819,8 +2076,8 @@ class ExtractDotData:
         for i, data in enumerate(data_list):
             x = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, front_ch] - front_points + template_len)
             for ch in range(chs):
-                xp = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, rear_ch] + rear_points)
-                yp = data[peak_poses[i, front_ch] - front_points:peak_poses[i, rear_ch] + rear_points, ch]
+                xp = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, rear_ch] + rear_points + 1)
+                yp = data[peak_poses[i, front_ch] - front_points:peak_poses[i, rear_ch] + rear_points + 1, ch]
                 template[:, ch] += np.interp(x * xp.shape[0] / template_len, xp, yp)
         return (template / np.max(template, axis=0) * 1024).astype(np.int)
 
@@ -1890,6 +2147,11 @@ class ExtractDotData:
         plt.show()
         # 保存template到txt
         if template_filename is not None:
+            save_folder = os.path.dirname(template_filename)
+            if not os.path.exists(save_folder) and save_folder != '':
+                # print(save_folder)
+                os.makedirs(save_folder)
+                print(save_filename + ' is created')
             np.savetxt(template_filename, template, fmt='%+6d', delimiter='\t')
             print('template shape: ', template.shape)
         else:
@@ -1940,6 +2202,3 @@ def get_fig_title(filename='test.txt', layers=(-1,)):
         else:
             out_str += strs[layer] + '_'
     return out_str
-
-
-
