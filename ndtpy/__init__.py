@@ -1,6 +1,5 @@
 from . import fw
-from . import project_common_use
 from . import tools
+from . import project_common_use
 
-__all__ = ['fw', 'tools', 'project_common_use']
-name = 'ndtpy'
+__all__ = ['fw', 'tools','project_common_use']
