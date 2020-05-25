@@ -1,7 +1,5 @@
 import collections
 import configparser
-import ctypes
-import ctypes.wintypes
 import functools
 import itertools
 import logging
@@ -18,6 +16,12 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+try:
+    import ctypes
+    import ctypes.wintypes
+except ImportError:
+    logging.warn('You should use ctypes only in Windows')
 
 try:
     import pygame
