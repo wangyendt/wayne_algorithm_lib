@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 
 import math
 import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 import pandas as pd
 
@@ -63,6 +64,8 @@ except ImportError:
     logging.warn('Try pip install pyperclip')
 
 from scipy import signal
+
+matplotlib.use('TkAgg')  # for mac
 
 """
 table of content:
