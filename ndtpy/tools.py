@@ -20,7 +20,7 @@ import pandas as pd
 try:
     import ctypes
     import ctypes.wintypes
-except ImportError:
+except:
     logging.warn('You should use ctypes only in Windows')
 
 try:
@@ -329,9 +329,10 @@ class GlobalHotKeys:
     """
 
     key_mapping = []
-    user32 = ctypes.windll.user32
+    user32 = None
 
     try:
+        user32 = ctypes.windll.user32
         MOD_ALT = win32con.MOD_ALT
         MOD_CTRL = win32con.MOD_CONTROL
         MOD_CONTROL = win32con.MOD_CONTROL
