@@ -5,6 +5,7 @@ import itertools
 import logging
 import operator as op
 import os
+import pyperclip
 import re
 import sys
 import time
