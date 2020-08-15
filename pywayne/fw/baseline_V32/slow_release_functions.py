@@ -1,7 +1,7 @@
 import numpy as np
 
 from .super_parameters import A_TH,B_TH
-from ndtpy.fw.utils import FindLocalExtremeValue
+from pywayne.fw.utils import FindLocalExtremeValue
 
 
 def calculate_I_3_params(rawdata, baseline, max_ch=0, min_ch=1):

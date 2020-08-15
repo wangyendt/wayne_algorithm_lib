@@ -1257,14 +1257,14 @@ def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
     maxQueue = collections.deque()
     retMin, retMax = [], []
     for i, n in enumerate(data):
+        if minQueue and i - minQueue[0] >= k: minQueue.popleft()
+        if maxQueue and i - maxQueue[0] >= k: maxQueue.popleft()
         while minQueue and n < data[minQueue[-1]]: minQueue.pop()
         while maxQueue and n > data[maxQueue[-1]]: maxQueue.pop()
         minQueue.append(i)
         maxQueue.append(i)
-        if i - minQueue[0] >= k: minQueue.popleft()
-        if i - maxQueue[0] >= k: maxQueue.popleft()
-        retMin.append(data[minQueue[0]] if i >= k - 1 else data[i])
-        retMax.append(data[maxQueue[0]] if i >= k - 1 else data[i])
+        retMin.append(data[minQueue[0]])
+        retMax.append(data[maxQueue[0]])
     return retMin, retMax
 
 

@@ -3,11 +3,11 @@ import shutil
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ndtpy.tools import list_all_files
-from ndtpy.tools import LoadData
-from ndtpy.fw.utils import FindLocalExtremeValue
+from pywayne.tools import list_all_files
+from pywayne.tools import LoadData
+from pywayne.fw.utils import FindLocalExtremeValue
 
-from ndtpy.fw.baseline_diff_v1 import BaseLine, leave_type_dict
+from pywayne.fw.baseline_diff_v1 import BaseLine, leave_type_dict
 # from .baseline_diff_v1 import BaseLine, leave_type_dict
 
 plt.rcParams['font.family'] = 'FangSong'

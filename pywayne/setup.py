@@ -15,7 +15,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="ndtpy",
+    name="pywayne",
     version="0.0.1",
     author="NDTers",
     author_email="wangye.hope@gmail.com",
