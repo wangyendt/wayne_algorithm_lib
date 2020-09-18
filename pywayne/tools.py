@@ -1,3 +1,4 @@
+import bisect
 import collections
 import configparser
 import functools
@@ -7,6 +8,7 @@ import operator as op
 import os
 import pyperclip
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -66,13 +68,14 @@ except ImportError:
 
 from scipy import signal
 
-matplotlib.use('TkAgg')  # for mac
+# matplotlib.use('TkAgg')  # for mac
 
 """
 table of content:
 1. Decorator:
     a. (decorator) func_timer
     b. (decorator) maximize_figure
+    c. (decorator) singleton
 2. DataStructure:
     a. (class) ConditionTree
     b. (class) UnionFind
@@ -131,6 +134,23 @@ def maximize_figure(func):
         return ret
 
     return wrapper
+
+
+def singleton(cls):
+    """
+    单例模式
+    :param cls: 需要被单例化的类
+    :return:
+    """
+
+    _instance = {}
+
+    def inner():
+        if cls not in _instance:
+            _instance[cls] = cls()
+        return _instance[cls]
+
+    return inner
 
 
 class ConditionTree:
