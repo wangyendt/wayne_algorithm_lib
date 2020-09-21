@@ -76,6 +76,7 @@ table of content:
     a. (decorator) func_timer
     b. (decorator) maximize_figure
     c. (decorator) singleton
+    d. (decorator) binding_press_release
 2. DataStructure:
     a. (class) ConditionTree
     b. (class) UnionFind
@@ -151,6 +152,20 @@ def singleton(cls):
         return _instance[cls]
 
     return inner
+
+
+def binding_press_release(func_dict: dict):
+    def binding_press_release_decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            ret = func(*args, **kwargs)
+            for k, v in func_dict.items():
+                ret.canvas.mpl_connect(k, v)
+            return ret
+
+        return wrapper
+
+    return binding_press_release_decorator
 
 
 class ConditionTree:
