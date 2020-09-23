@@ -10,6 +10,7 @@ import pyperclip
 import re
 import shutil
 import sys
+import threading
 import time
 import traceback
 import warnings
@@ -139,22 +140,41 @@ def maximize_figure(func):
 
 def singleton(cls):
     """
-    单例模式
+    单例模式装饰器
     :param cls: 需要被单例化的类
-    :return:
+    :param args: 
+    :param kw: 
+    :return: 
     """
 
-    _instance = {}
+    instance = {}
+    lock = threading.Lock()
 
-    def inner():
-        if cls not in _instance:
-            _instance[cls] = cls()
-        return _instance[cls]
+    @functools.wraps(cls)
+    def _singleton(*args, **kw):
+        if cls not in instance:
+            with lock:
+                if cls not in instance:
+                    instance[cls] = cls(*args, **kw)
+        return instance[cls]
 
-    return inner
+    return _singleton
 
 
 def binding_press_release(func_dict: dict):
+    """
+    用来绑定figure和键鼠处理函数
+    :param func_dict: 映射字典
+    :return: 
+    
+    example:
+    func_dict = {
+        'button_press_event': on_button_press,
+        'button_release_event': on_button_release,
+        'key_press_event': on_key_press,
+    }
+    """
+
     def binding_press_release_decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
