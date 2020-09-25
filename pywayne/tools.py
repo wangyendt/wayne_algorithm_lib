@@ -75,9 +75,10 @@ from scipy import signal
 table of content:
 1. Decorator:
     a. (decorator) func_timer
-    b. (decorator) maximize_figure
-    c. (decorator) singleton
-    d. (decorator) binding_press_release
+    b. (decorator) func_timer_batch
+    c. (decorator) maximize_figure
+    d. (decorator) singleton
+    e. (decorator) binding_press_release
 2. DataStructure:
     a. (class) ConditionTree
     b. (class) UnionFind
@@ -116,9 +117,29 @@ def func_timer(func):
     def wrapper(*args, **kw):
         start = time.time()
         r = func(*args, **kw)
-        print('%s excute in %.3f s' % (func.__name__, (time.time() - start)))
+        print(f'{func.__name__} excute in {time.time() - start:.3f} s')
         return r
 
+    return wrapper
+
+
+def func_timer_batch(func):
+    """
+    用于计算函数被调用次数和总耗时
+    :param func: 
+    :return: 
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kw):
+        start = time.time()
+        r = func(*args, **kw)
+        end = time.time()
+        wrapper.num_calls += 1
+        wrapper.elapsed_time += end - start
+        return r
+
+    wrapper.num_calls = 0
+    wrapper.elapsed_time = 0
     return wrapper
 
 
