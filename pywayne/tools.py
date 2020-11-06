@@ -22,6 +22,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import scipy as sp
 from scipy import signal
 
@@ -63,37 +64,8 @@ except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
-# matplotlib.use('TkAgg')  # for mac
 
-"""
-table of content:
-1. Decorator:
-    a. (decorator) func_timer
-    b. (decorator) func_timer_batch
-    c. (decorator) maximize_figure
-    d. (decorator) singleton
-    e. (decorator) binding_press_release
-2. DataStructure:
-    a. (class) ConditionTree
-    b. (class) UnionFind
-3. Useful tools:
-    a. (function) list_all_files
-    b. (class) GlobalHotKeys
-    c. (class) GuiOperation
-    d. (class) XmlIO
-4. Data processing:
-    a. (function) peak_det
-    b. (function) butter_bandpass_filter
-    c. (class) FindLocalExtremeValue
-    d. (class) DataProcessing
-    e. (class) ExtractRollingData
-    f. (class) CurveSimilarity
-    g. (function) find_extreme_value_in_sliding_window
-5. mathematics:
-    a. (function) get_all_factors
-    b. (function) digit_counts
-    c. (function) karatsuba_multiplication
-"""
+# matplotlib.use('TkAgg')  # for mac
 
 
 # Wayne:
@@ -741,7 +713,7 @@ def butter_bandpass_filter(x, order=2, wn=0.2, btype='low'):
     )
 
 
-class FindLocalExtremeValue:
+class FindLocalExtremum:
     """
     本类用于寻找局部极值
 
@@ -828,7 +800,200 @@ class FindLocalExtremeValue:
         return local_diff, local_gap, min_slp, max_slp, local_extreme_real_value
 
 
-class DataProcessing:
+class CurveSimilarity:
+    """
+    用于计算曲线x和曲线y的相似度
+
+    Author:   wangye
+    Datetime: 2019/6/24 23:17
+
+    https://zhuanlan.zhihu.com/p/69170491?utm_source=wechat_session&utm_medium=social&utm_oi=664383466599354368
+    Example:
+    # cs = CurveSimilarity()
+    # s1 = np.array([1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1])
+    # s2 = np.array([0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2])
+    # s3 = np.array([0.8, 1.5, 0, 1.2, 0, 0, 0.6, 1, 1.2, 0, 0, 1, 0.2, 2.4, 0.5, 0.4])
+    # print(cs.dtw(s1, s2))
+    # print(cs.dtw(s1, s3))
+    """
+
+    @staticmethod
+    def _check(var):
+        if np.ndim(var) == 1:
+            return np.reshape(var, (-1, 1))
+        else:
+            return np.array(var)
+
+    def dtw(self, x, y, mode='global', *params):
+        """
+        计算曲线x和曲线y的DTW距离，其中global方法将全部数据用于DTW计算，local方法将一部分数据用于DTW计算
+        x和y的行数代表数据长度，需要x和y的列数相同
+        :param x: 第一条曲线
+        :param y: 第二条曲线
+        :param mode: 'local'用于计算局部DTW，'global'用于计算全局DTW
+        :param params: 若为local DTW，则params为local的窗长
+        :return: 曲线x和曲线y的DTW距离
+        """
+        x, y = self._check(x), self._check(y)
+        m, n, p = x.shape[0], y.shape[0], x.shape[1]
+        assert x.shape[1] == y.shape[1]
+        distance = np.reshape(
+            [(x[i, ch] - y[j, ch]) ** 2 for i in range(m) for j in range(n) for ch in range(p)],
+            [m, n, p]
+        )
+        dp = np.zeros((m, n, p))
+        dp[0, 0, 0] = distance[0, 0, 0]
+        for i in range(1, m):
+            dp[i, 0] = dp[i - 1, 0] + distance[i, 0]
+        for j in range(1, n):
+            dp[0, j] = dp[0, j - 1] + distance[0, j]
+        for i in range(1, m):
+            for j in range(1, n):
+                for ch in range(p):
+                    dp[i, j, ch] = min(
+                        dp[i - 1, j - 1, ch],
+                        dp[i - 1, j, ch],
+                        dp[i, j - 1, ch]
+                    ) + distance[i, j, ch]
+        path = [[[m - 1, n - 1]] for _ in range(p)]
+        for ch in range(p):
+            pm, pn = m - 1, n - 1
+            while pm > 0 and pn > 0:
+                if pm == 0:
+                    pn -= 1
+                elif pn == 0:
+                    pm -= 1
+                else:
+                    c = np.argmin([dp[pm - 1, pn, ch], dp[pm, pn - 1, ch], dp[pm - 1, pn - 1, ch]])
+                    if c == 0:
+                        pm -= 1
+                    elif c == 1:
+                        pn -= 1
+                    else:
+                        pm -= 1
+                        pn -= 1
+                path[ch].append([pm, pn])
+            path[ch].append([0, 0])
+        ret = [[(x[path[ch][pi][0], ch] - y[path[ch][pi][1], ch]) ** 2
+                for pi in range(len(path[ch]))] for ch in range(p)]
+        if mode == 'global':
+            return np.squeeze([np.mean(r) for r in ret])
+        elif mode == 'local':
+            k = params[0]
+            return np.squeeze([
+                np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
+            ])
+
+
+def find_extremum_in_sliding_window(data: list, k: int) -> list:
+    """
+    寻找一段数据中每个窗长范围内的最值，时间复杂度O(n)
+    :param data: 数据 
+    :param k: 窗长
+    :return: 包含每个窗长最值的列表
+    """
+    minQueue = collections.deque()
+    maxQueue = collections.deque()
+    retMin, retMax = [], []
+    for i, n in enumerate(data):
+        if minQueue and i - minQueue[0] >= k: minQueue.popleft()
+        if maxQueue and i - maxQueue[0] >= k: maxQueue.popleft()
+        while minQueue and n < data[minQueue[-1]]: minQueue.pop()
+        while maxQueue and n > data[maxQueue[-1]]: maxQueue.pop()
+        minQueue.append(i)
+        maxQueue.append(i)
+        retMin.append(data[minQueue[0]])
+        retMax.append(data[maxQueue[0]])
+    return retMin, retMax
+
+
+def get_all_factors(n: int) -> list:
+    """
+    Return all factors of positive integer n.
+
+    Author:   wangye
+    Datetime: 2019/7/16 16:00
+
+    :param n: A positive number
+    :return: a list which contains all factors of number n
+    """
+    return list(set(reduce(list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
+
+
+def digitCount(n, k):
+    """
+    Count the number of occurrences of digit k from 1 to n.
+    Author:   wangye
+    Datetime: 2019/7/18 14:49
+
+    :param n:
+    :param k:
+    :return: The count.
+    """
+    N, ret, dig = n, 0, 1
+    while n >= 1:
+        m, r = divmod(n, 10)
+        if r > k:
+            ret += (m + 1) * dig
+        elif r < k:
+            ret += m * dig
+        elif r == k:
+            ret += m * dig + (N - n * dig + 1)
+        n //= 10
+        dig *= 10
+    if k == 0:
+        if N == 0:
+            return 1
+        else:
+            return ret - dig // 10
+    return ret
+
+
+def karatsuba_multiplication(x, y):
+    """Multiply two integers using Karatsuba's algorithm."""
+
+    # convert to strings for easy access to digits
+    def zero_pad(number_string, zeros, left=True):
+        """Return the string with zeros added to the left or right."""
+        for i in range(zeros):
+            if left:
+                number_string = '0' + number_string
+            else:
+                number_string = number_string + '0'
+        return number_string
+
+    x = str(x)
+    y = str(y)
+    # base case for recursion
+    if len(x) == 1 and len(y) == 1:
+        return int(x) * int(y)
+    if len(x) < len(y):
+        x = zero_pad(x, len(y) - len(x))
+    elif len(y) < len(x):
+        y = zero_pad(y, len(x) - len(y))
+    n = len(x)
+    j = n // 2
+    # for odd digit integers
+    if (n % 2) != 0:
+        j += 1
+    BZeroPadding = n - j
+    AZeroPadding = BZeroPadding * 2
+    a = int(x[:j])
+    b = int(x[j:])
+    c = int(y[:j])
+    d = int(y[j:])
+    # recursively calculate
+    ac = karatsuba_multiplication(a, c)
+    bd = karatsuba_multiplication(b, d)
+    k = karatsuba_multiplication(a + b, c + d)
+    A = int(zero_pad(str(ac), AZeroPadding, False))
+    B = int(zero_pad(str(k - ac - bd), BZeroPadding, False))
+    return A + B + bd
+
+
+# specific
+
+class ForceSensorDataProcessing:
     """
     用于从rawdata中提取force
 
@@ -841,7 +1006,7 @@ class DataProcessing:
         rawdata,
         np.tile(rawdata[-1], [200, 1])
     ))
-    dp = DataProcessing(rawdata, f)
+    dp = ForceSensorDataProcessing(rawdata, f)
     dp.pre_process()
     dp.limiting_filter()
     dp.calc_moving_avg()
@@ -1057,7 +1222,7 @@ class DataProcessing:
             self.force_val[self.tds[ii]:self.tus[ii]] = self.force_signal[self.tds[ii]:self.tus[ii]]
 
 
-class ExtractRollingData:
+class ForceSensorExtractRollingData:
     """
     用于从滑动数据中提取数据
 
@@ -1065,7 +1230,7 @@ class ExtractRollingData:
     Datetime: 2019/5/22 02:41
 
     example:
-    rd = ExtractRollingData(rawdata, f)
+    rd = ForceSensorExtractRollingData(rawdata, f)
     rd.simple_remove_base()
     rd.find_peak()
     rd.filt_data()
@@ -1231,199 +1396,6 @@ class ExtractRollingData:
         plt.title(self.filename)
         plt.show()
 
-
-class CurveSimilarity:
-    """
-    用于计算曲线x和曲线y的相似度
-
-    Author:   wangye
-    Datetime: 2019/6/24 23:17
-
-    https://zhuanlan.zhihu.com/p/69170491?utm_source=wechat_session&utm_medium=social&utm_oi=664383466599354368
-    Example:
-    # cs = CurveSimilarity()
-    # s1 = np.array([1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1])
-    # s2 = np.array([0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2])
-    # s3 = np.array([0.8, 1.5, 0, 1.2, 0, 0, 0.6, 1, 1.2, 0, 0, 1, 0.2, 2.4, 0.5, 0.4])
-    # print(cs.dtw(s1, s2))
-    # print(cs.dtw(s1, s3))
-    """
-
-    @staticmethod
-    def _check(var):
-        if np.ndim(var) == 1:
-            return np.reshape(var, (-1, 1))
-        else:
-            return np.array(var)
-
-    def dtw(self, x, y, mode='global', *params):
-        """
-        计算曲线x和曲线y的DTW距离，其中global方法将全部数据用于DTW计算，local方法将一部分数据用于DTW计算
-        x和y的行数代表数据长度，需要x和y的列数相同
-        :param x: 第一条曲线
-        :param y: 第二条曲线
-        :param mode: 'local'用于计算局部DTW，'global'用于计算全局DTW
-        :param params: 若为local DTW，则params为local的窗长
-        :return: 曲线x和曲线y的DTW距离
-        """
-        x, y = self._check(x), self._check(y)
-        m, n, p = x.shape[0], y.shape[0], x.shape[1]
-        assert x.shape[1] == y.shape[1]
-        distance = np.reshape(
-            [(x[i, ch] - y[j, ch]) ** 2 for i in range(m) for j in range(n) for ch in range(p)],
-            [m, n, p]
-        )
-        dp = np.zeros((m, n, p))
-        dp[0, 0, 0] = distance[0, 0, 0]
-        for i in range(1, m):
-            dp[i, 0] = dp[i - 1, 0] + distance[i, 0]
-        for j in range(1, n):
-            dp[0, j] = dp[0, j - 1] + distance[0, j]
-        for i in range(1, m):
-            for j in range(1, n):
-                for ch in range(p):
-                    dp[i, j, ch] = min(
-                        dp[i - 1, j - 1, ch],
-                        dp[i - 1, j, ch],
-                        dp[i, j - 1, ch]
-                    ) + distance[i, j, ch]
-        path = [[[m - 1, n - 1]] for _ in range(p)]
-        for ch in range(p):
-            pm, pn = m - 1, n - 1
-            while pm > 0 and pn > 0:
-                if pm == 0:
-                    pn -= 1
-                elif pn == 0:
-                    pm -= 1
-                else:
-                    c = np.argmin([dp[pm - 1, pn, ch], dp[pm, pn - 1, ch], dp[pm - 1, pn - 1, ch]])
-                    if c == 0:
-                        pm -= 1
-                    elif c == 1:
-                        pn -= 1
-                    else:
-                        pm -= 1
-                        pn -= 1
-                path[ch].append([pm, pn])
-            path[ch].append([0, 0])
-        ret = [[(x[path[ch][pi][0], ch] - y[path[ch][pi][1], ch]) ** 2
-                for pi in range(len(path[ch]))] for ch in range(p)]
-        if mode == 'global':
-            return np.squeeze([np.mean(r) for r in ret])
-        elif mode == 'local':
-            k = params[0]
-            return np.squeeze([
-                np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
-            ])
-
-
-def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
-    """
-    寻找一段数据中每个窗长范围内的最值，时间复杂度O(n)
-    :param data: 数据 
-    :param k: 窗长
-    :return: 包含每个窗长最值的列表
-    """
-    minQueue = collections.deque()
-    maxQueue = collections.deque()
-    retMin, retMax = [], []
-    for i, n in enumerate(data):
-        if minQueue and i - minQueue[0] >= k: minQueue.popleft()
-        if maxQueue and i - maxQueue[0] >= k: maxQueue.popleft()
-        while minQueue and n < data[minQueue[-1]]: minQueue.pop()
-        while maxQueue and n > data[maxQueue[-1]]: maxQueue.pop()
-        minQueue.append(i)
-        maxQueue.append(i)
-        retMin.append(data[minQueue[0]])
-        retMax.append(data[maxQueue[0]])
-    return retMin, retMax
-
-
-def get_all_factors(n: int) -> list:
-    """
-    Return all factors of positive integer n.
-
-    Author:   wangye
-    Datetime: 2019/7/16 16:00
-
-    :param n: A positive number
-    :return: a list which contains all factors of number n
-    """
-    return list(set(reduce(list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
-
-
-def digitCount(n, k):
-    """
-    Count the number of occurrences of digit k from 1 to n.
-    Author:   wangye
-    Datetime: 2019/7/18 14:49
-
-    :param n:
-    :param k:
-    :return: The count.
-    """
-    N, ret, dig = n, 0, 1
-    while n >= 1:
-        m, r = divmod(n, 10)
-        if r > k:
-            ret += (m + 1) * dig
-        elif r < k:
-            ret += m * dig
-        elif r == k:
-            ret += m * dig + (N - n * dig + 1)
-        n //= 10
-        dig *= 10
-    if k == 0:
-        if N == 0:
-            return 1
-        else:
-            return ret - dig // 10
-    return ret
-
-
-def karatsuba_multiplication(x, y):
-    """Multiply two integers using Karatsuba's algorithm."""
-
-    # convert to strings for easy access to digits
-    def zero_pad(number_string, zeros, left=True):
-        """Return the string with zeros added to the left or right."""
-        for i in range(zeros):
-            if left:
-                number_string = '0' + number_string
-            else:
-                number_string = number_string + '0'
-        return number_string
-
-    x = str(x)
-    y = str(y)
-    # base case for recursion
-    if len(x) == 1 and len(y) == 1:
-        return int(x) * int(y)
-    if len(x) < len(y):
-        x = zero_pad(x, len(y) - len(x))
-    elif len(y) < len(x):
-        y = zero_pad(y, len(x) - len(y))
-    n = len(x)
-    j = n // 2
-    # for odd digit integers
-    if (n % 2) != 0:
-        j += 1
-    BZeroPadding = n - j
-    AZeroPadding = BZeroPadding * 2
-    a = int(x[:j])
-    b = int(x[j:])
-    c = int(y[:j])
-    d = int(y[j:])
-    # recursively calculate
-    ac = karatsuba_multiplication(a, c)
-    bd = karatsuba_multiplication(b, d)
-    k = karatsuba_multiplication(a + b, c + d)
-    A = int(zero_pad(str(ac), AZeroPadding, False))
-    B = int(zero_pad(str(k - ac - bd), BZeroPadding, False))
-    return A + B + bd
-
-
-# Shine
 
 class GeneratePrivateModel:
     """
