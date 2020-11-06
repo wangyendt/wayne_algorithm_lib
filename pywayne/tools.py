@@ -2,8 +2,10 @@ import bisect
 import collections
 import configparser
 import functools
+import h5py
 import itertools
 import logging
+import math
 import operator as op
 import os
 import pyperclip
@@ -16,23 +18,21 @@ import traceback
 import warnings
 import xml.etree.ElementTree as ET
 
-import math
-import matplotlib.pyplot as plt
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy as sp
+from scipy import signal
+
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+import pygame
 
 try:
     import ctypes
     import ctypes.wintypes
 except:
     logging.warn('You should use ctypes only in Windows')
-
-try:
-    import pygame
-except ImportError:
-    logging.warn('Try pip install pygame')
-import scipy as sp
 
 try:
     import win32api
@@ -62,12 +62,6 @@ try:
 except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
-try:
-    import pyperclip
-except ImportError:
-    logging.warn('Try pip install pyperclip')
-
-from scipy import signal
 
 # matplotlib.use('TkAgg')  # for mac
 
@@ -95,12 +89,10 @@ table of content:
     e. (class) ExtractRollingData
     f. (class) CurveSimilarity
     g. (function) find_extreme_value_in_sliding_window
-    h. (function) get_model_from_rawdata
 5. mathematics:
-    a. (function) find_all_non_negative_integer_solutions
-    b. (function) get_all_factors
-    c. (function) digit_counts
-    d. (function) karatsuba_multiplication
+    a. (function) get_all_factors
+    b. (function) digit_counts
+    c. (function) karatsuba_multiplication
 """
 
 
@@ -129,6 +121,7 @@ def func_timer_batch(func):
     :param func: 
     :return: 
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kw):
         start = time.time()
@@ -728,20 +721,22 @@ def peak_det(v, delta, x=None):
     return np.array(maxtab), np.array(mintab)
 
 
-def butter_bandpass_filter(x, wn=0.2):
+def butter_bandpass_filter(x, order=2, wn=0.2, btype='low'):
     """
-    ButterWorth 低通滤波器
+    ButterWorth 滤波器
 
     Author:   wangye
     Datetime: 2019/4/24 16:00
 
     :param x: 待滤波矩阵, 2d-array
+    :param order: butterworth滤波器阶数
     :param wn: wn系数，权衡失真和光滑
+    :param btype: butterworth滤波器种类，默认为低通滤波
     :return: 滤波后矩阵, 2d-array
     """
-    b, a = signal.butter(N=2, Wn=wn, btype='low')
+    b, a = signal.butter(N=order, Wn=wn, btype=btype)
     return np.apply_along_axis(
-        lambda y: signal.filtfilt(b, a, y),
+        lambda y: sp.filtfilt(b, a, y),
         0, x
     )
 
@@ -1344,56 +1339,6 @@ def find_extreme_value_in_sliding_window(data: list, k: int) -> list:
     return retMin, retMax
 
 
-def get_model_from_rawdata(data, num_model_points=100, margin_peak_ratio=0.33):
-    """
-    从给定的m*n(n为通道数)的数据中，提取指定数量长度的模板，模板边界由边峰比决定
-    :param data: m*n数据
-    :param num_model_points: 模型长度 
-    :param margin_peak_ratio: 边峰比
-    :return: 模型
-    example:
-    model = get_model_from_rawdata(rawdata, 50, 0.4)
-    """
-    # normalization
-    data_peak = data.max(0)
-    # data /= data_peak
-    data = data / data_peak
-    data = data[data.max(1) > margin_peak_ratio]
-    model = np.apply_along_axis(
-        lambda x: np.interp(np.linspace(0, data.shape[0], num_model_points),
-                            np.arange(data.shape[0]),
-                            x),
-        0, data
-    )
-    model *= data_peak
-    return model
-
-
-def find_all_non_negative_integer_solutions(const_sum: int, num_vars: int):
-    """
-    求解所有满足x1+x2+...+x{num_vars}=const_sum的非负整数解
-
-    Author:   wangye
-    Datetime: 2019/4/16 17:49
-
-    :param const_sum:
-    :param num_vars:
-    :return:
-            所有非负整数解的list
-    """
-    if num_vars == 1:
-        solution_list = [[const_sum]]
-    else:
-        solution_list = []
-        for i in range(const_sum + 1):
-            result = find_all_non_negative_integer_solutions(const_sum - i, num_vars - 1)
-            for res in result:
-                tmp = [i]
-                tmp.extend(res)
-                solution_list.append(tmp)
-    return solution_list
-
-
 def get_all_factors(n: int) -> list:
     """
     Return all factors of positive integer n.
@@ -1404,8 +1349,7 @@ def get_all_factors(n: int) -> list:
     :param n: A positive number
     :return: a list which contains all factors of number n
     """
-    return list(set(reduce(
-        list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
+    return list(set(reduce(list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
 
 
 def digitCount(n, k):
@@ -1479,199 +1423,7 @@ def karatsuba_multiplication(x, y):
     return A + B + bd
 
 
-# Leon:
-
-class DataMark:
-    """
-    对数据进行手工标记，拆分数据成数据集
-
-    Author:   wannuliang
-    Datetime: 2019/4/17 09:15
-
-    example:
-
-    def data_mark_example():
-        dm = DataMark()
-        for f in list_all_files('..\\Debug-ETD1805_Power键', ['长按', '.txt'], []):
-            dm.mark(f, 'data')
-    """
-
-    mark_flag = False
-    fig = None
-    ax = None
-    mark_line = None
-    start = end = 0
-    flag = None
-    rawData = None
-    baseline = None
-    forceSig = None
-    forceFlag = None
-    file = None
-    dataSet_path = None
-
-    def onclick(self, event):
-        """
-        按住 ctrl 时点击鼠标，在图像上标注虚线
-        """
-        if self.mark_flag:
-            if self.mark_line:
-                self.mark_line.set_xdata((event.xdata, event.xdata))
-            else:
-                self.mark_line = self.ax.axvline(event.xdata, plt.ylim()[0], plt.ylim()[1], c='g', ls='--', lw=1)
-            self.fig.canvas.draw()
-
-    def key_press_event(self, event):
-        """
-        键盘事件 ctrl / delete / 右方向键
-        """
-        # 按住 ctrl 进入标记模式
-        if event.key == 'control':
-            self.mark_flag = True
-
-        # 按下 delete 删除标记线
-        if event.key == 'delete':
-            if self.mark_line:
-                self.mark_line.remove()
-                self.mark_line = None
-                self.fig.canvas.draw()
-
-        # 按下 enter 保存此段数据；按下右方向键跳过此段数据
-        if event.key == 'enter' or event.key == 'right':
-
-            # 根据标记线判断当前数据的离手情况
-            save_data_type = '未标记'
-            x_data = self.end
-
-            if self.mark_line and self.mark_line.get_xdata()[0] > self.start:
-                x_data = int(self.mark_line.get_xdata()[0])
-                if x_data > self.end:
-                    save_data_type = '断触'
-                else:
-                    save_data_type = '延迟释放'
-                self.end = max(self.end, x_data)
-
-            # 保存数据时，向前取100帧，向后取300帧
-            offset1 = 100
-            offset2 = min(self.forceFlag.size - self.end, 300)
-
-            s = self.start - offset1
-            e = self.end + offset2
-
-            # 仅保存持续按压超过 5 帧的信号段
-            if event.key == 'enter' and self.end - self.start > 5:
-                new_flag = self.forceFlag[s:e].copy()
-                new_flag[:offset1] = 0
-                new_flag[-(offset2 + (self.end - x_data)):] = 0
-                new_flag[offset1:-(offset2 + (self.end - x_data))] = 1
-
-                new_f = self.dataSet_path + '/' + self.file
-                new_f = new_f.replace('.txt', '_' + str(s) + '-' + str(e) + '.txt')
-
-                contents = np.hstack((self.rawData[s:e],
-                                      self.baseline[s:e],
-                                      self.forceSig[s:e],
-                                      self.forceFlag[s:e].reshape(new_flag.size, 1),
-                                      new_flag.reshape(new_flag.size, 1)))
-
-                folder = new_f[0:new_f.rfind('\\')]
-                if not os.path.exists(folder):
-                    os.makedirs(folder)
-
-                np.savetxt(new_f, contents, fmt='%d', delimiter='\t')
-                print(save_data_type, new_f)
-
-            # 绘制下一段图像
-            if self.mark_line:
-                self.mark_line.remove()
-                self.mark_line = None
-
-            if '01' in self.flag[self.end:-1]:
-                self.start = self.flag.find('01', self.end, -1) + 1
-                self.end = self.flag.find('10', self.start, -1) + 1
-
-                if self.end != 0:
-                    force_flag_mark = self.forceFlag.copy() * 100
-                    force_flag_mark[:self.start] = None
-                    force_flag_mark[self.end:] = None
-
-                    plt.cla()
-                    plt.plot(self.rawData - self.rawData[self.start - 5, :], label='rawData')
-                    plt.plot(self.forceFlag * 100, label='forceFlag', ls='--', c='gray')
-                    plt.plot(force_flag_mark, label='current', lw=2, ls='-', c='black')
-                    plt.legend(loc='upper left')
-
-                    margin_x = (self.end - self.start) / 2
-                    plt.xlim(self.start - margin_x, max(self.end + margin_x, self.start - margin_x + 200))
-
-                    y_max = np.max((self.rawData - self.rawData[self.start - 5, :])[self.start:self.end])
-                    y_min = np.min((self.rawData - self.rawData[self.start - 5, :])[self.start:self.end])
-                    margin_y = (y_max - y_min) / 3
-                    plt.ylim(min(y_min - margin_y, -20), max(y_max + margin_y, 120))
-
-                    self.fig.canvas.draw()
-
-                else:
-                    plt.close()
-
-            else:
-                plt.close()
-
-    def key_release_event(self, event):
-        """
-        松开 ctrl 按键退出标记模式
-        """
-        if event.key == 'control':
-            self.mark_flag = False
-
-    def mark(self, file, data_set_path):
-        """
-        经手工标记后，切分数据至dataSet_path路径下
-        :param file: 待切分文件
-        :param data_set_path: 切分后数据保存路径
-        """
-        self.file = file
-        self.dataSet_path = data_set_path
-
-        with open(file, 'r', encoding='utf-8') as fu:
-            print('【打开文件】', self.file)
-            temp = pd.read_csv(fu, skiprows=1, header=None, delimiter='\t')
-            data = np.array(temp.iloc[:, 0:-1])
-
-            # 不同数据格式需要针对性修改此处下标
-            self.rawData = data[:, 29:35]
-            self.baseline = data[:, 35:41]
-            self.forceSig = data[:, 41:47]
-            self.forceFlag = data[:, 2]
-
-            self.start = self.end = 0
-            self.flag = ''.join(str(x) for x in list(self.forceFlag))
-            self.mark_line = None
-
-            self.fig = plt.figure()
-            self.ax = self.fig.add_subplot(111)
-
-            plt.plot(self.rawData, label='rawData')
-            plt.plot(self.forceFlag * 100, label='forceFlag', ls='--')
-            plt.legend(loc='upper left')
-
-            # 绑定键鼠事件
-            self.fig.canvas.mpl_connect('key_press_event', self.key_press_event)
-            self.fig.canvas.mpl_connect('key_release_event', self.key_release_event)
-            self.fig.canvas.mpl_connect('button_press_event', self.onclick)
-
-            plt.show()
-
-
 # Shine
-def split_root(root, path, tail='_OUTPOINT'):
-    path_split = path.split('\\')
-    root_split = root.split('\\')
-    path_split[len(root_split) - 1] = path_split[len(root_split) - 1] + tail
-    result_root = '\\'.join(path_split[:-1])
-    filename_root = result_root
-    filename = path_split[-1].split('.')[0]
-    return filename, filename_root, result_root
-
 
 class GeneratePrivateModel:
     """
@@ -1906,384 +1658,3 @@ class GeneratePrivateModel:
         np.savetxt(result_root + '\\' + filename + '.txt', self.pri_model, fmt='%8.2f', delimiter='\t')
         print('Save text succeed!')
         print(result_root + '\\' + filename + '.txt')
-
-
-# Carry
-
-class ExtractDotData:
-    """
-    提取密集打点数据
-
-    Carry Chen
-
-    example:
-    save_folder = 'result_folder'
-    edd = ExtractDotData()
-    for fid,f in enumerate(list_all_files('打点数据文件夹'，['.txt'])):
-        simple_file_name = get_fig_title(f,(-1,))
-        rawdata = 你从file里面读出的rawdata, np.array, shape = N * chs
-        edd(rawdata, save_filename = save_folder + '//' + simple_file_name + '.txt',fig_name=simple_file_name)
-    # only when you want to generate public template
-    files = list_all_files(save_folder, ['.txt'])
-    edd.generate_public_template(files, template_len=None)
-    # only when you want compare some public tempalte in a same folder
-    files = list_all_files(template_folder, ['.txt'])
-    edd.read_and_compare_template(files)
-    """
-    # 默认参数
-    if True:
-        plt.rcParams['font.family'] = 'FangSong'
-        plt.rcParams['axes.unicode_minus'] = False
-        _markers = ('o', 's', 'p', '*', '+', '<', '>', '^')
-        _colors = ('blue', 'green', 'red', 'orange', 'gray', 'yellow', 'pink', 'black')
-
-        # baseline tracking
-        _alpha = 0.005
-        _limit = 5
-        # force flag
-        _trigger_th = 20
-        _slope_th = 0
-        _leave_ratio_th = 0.1
-        _leave_cnt_th = 100
-        _touch_cnt_th = 100
-        # a better setting for PT101
-        # base_index = [-150, -50]
-        # data_index = [100, 200]
-        # chose_index = [10, 90]
-        # sig extract -- from Dragon Long's APK
-        _base_index = (-90, -50)
-        _data_index = (80, 120)
-        _chose_index = (15, 25)
-
-    def __init__(self, alpha=_alpha, limit=_limit,
-                 trigger_th=_trigger_th, slope_th=_slope_th, leave_ratio_th=_leave_ratio_th,
-                 leave_cnt_th=_leave_cnt_th, touch_cnt_th=_touch_cnt_th,
-                 base_index=_base_index, data_index=_data_index, chose_index=_chose_index,
-                 negative_forceflag=False):
-        self.__skip_frame = 100
-        self.alpha = alpha
-        self.limit = limit
-        self.trigger_th = trigger_th
-        self.slope_th = slope_th
-        self.leave_ratio_th = leave_ratio_th
-        self.leave_cnt_th = leave_cnt_th
-        self.touch_cnt_th = touch_cnt_th
-        self.base_index = base_index
-        self.data_index = data_index
-        self.chose_index = chose_index
-        self.negative_forceflag = negative_forceflag
-
-    def __from_rawdata_to_matrix(self, rawdata):
-        """
-        从rawdata中提取打点的矩阵
-
-        :param rawdata: np.array, shape: N * CHS
-        :return: out_data: np.array，shape: k * CHS, k为打点次数
-        """
-        if rawdata.ndim == 1:
-            rawdata = np.reshape(rawdata, newshape=(-1, 1))
-        CHS = rawdata.shape[1]
-        raw = np.vstack(
-            (np.tile(rawdata[0], [self.__skip_frame, 1]), rawdata, np.tile(rawdata[-1], [self.__skip_frame, 1])))
-        bsl = raw + 0  # equal to deepcopy
-        force_flag = np.zeros(shape=(raw.shape[0], 1))
-        last_maxch = peak = touch_cnt = 0
-        leave_cnt = 9999
-        out_data = np.zeros(shape=(0, CHS))
-        ff_point = []
-        for i in range(self.__skip_frame, raw.shape[0]):
-            force_flag[i] = force_flag[i - 1]
-            sig = raw[i] - bsl[i - 1]
-            maxch = np.argmax(sig, axis=0)
-            minch = np.argmin(sig, axis=0)
-            if force_flag[i - 1] == 0:
-                delta = raw[i] - bsl[i - 1]
-                leave_cnt += 1
-                for ch in range(CHS):  # bsl tracking
-                    bsl[i, ch] = bsl[i - 1, ch] + np.sign(delta[ch]) * min(self.alpha * abs(delta[ch]), self.limit)
-                if ((raw[i, maxch] - raw[i - 1, maxch] > self.slope_th) or
-                    (raw[i - 1, maxch] - raw[i - 2, maxch] > self.slope_th)) and \
-                        sig[maxch] > self.trigger_th and leave_cnt > self.leave_cnt_th:  # force_flag trigger
-                    force_flag[i] = 1
-                    last_maxch = maxch
-                    peak = sig[last_maxch]
-                    touch_cnt = 0
-                elif (((raw[i, minch] - raw[i - 1, minch] < -self.slope_th) or
-                       (raw[i - 1, minch] - raw[i - 2, minch] < - self.slope_th)) and \
-                      sig[minch] < -self.trigger_th and leave_cnt > self.leave_cnt_th) \
-                        and self.negative_forceflag:  # force_flag trigger
-                    force_flag[i] = 2
-                    last_maxch = minch
-                    peak = sig[minch]
-                    touch_cnt = 0
-            elif force_flag[i - 1] == 1:
-                bsl[i] = bsl[i - 1] + 0
-                touch_cnt += 1
-                if sig[maxch] > peak:
-                    peak = sig[maxch]
-                    last_maxch = maxch
-                if sig[minch] < -peak and self.negative_forceflag == True:
-                    peak = sig[minch]
-                    last_maxch = minch
-                    force_flag[i] = 2
-                if sig[last_maxch] < self.leave_ratio_th * peak and raw[i, last_maxch] > raw[i - 2, last_maxch] \
-                        and touch_cnt > self.touch_cnt_th:
-                    force_flag[i] = 0
-                    leave_cnt = 0
-                    bsl[i] = rawdata[i] + 0
-            elif force_flag[i - 1] == 2 and self.negative_forceflag:
-                bsl[i] = bsl[i - 1] + 0
-                touch_cnt += 1
-                if sig[minch] < peak:
-                    peak = sig[minch]
-                    last_maxch = minch
-                if sig[maxch] > -peak:
-                    peak = sig[maxch]
-                    last_maxch = maxch
-                    force_flag[i] = 1
-                if sig[last_maxch] > self.leave_ratio_th * peak and raw[i, last_maxch] < raw[i - 2, last_maxch] \
-                        and touch_cnt > self.touch_cnt_th:
-                    force_flag[i] = 0
-                    leave_cnt = 0
-                    bsl[i] = rawdata[i] + 0
-            if force_flag[i - 1] == 0 and force_flag[i] == 1:
-                base = np.sort(raw[i + self.base_index[0]:i + self.base_index[1]], axis=0)
-                data = np.sort(raw[i + self.data_index[0]:i + self.data_index[1]], axis=0)
-                base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
-                data = np.mean(data[self.chose_index[0]:self.chose_index[1]], axis=0)
-                out_data = np.r_[out_data, np.reshape(data - base, (1, CHS))]
-                ff_point.append(i)
-            elif force_flag[i - 1] == 0 and force_flag[i] == 2 and self.negative_forceflag:
-                base = np.sort(raw[i + self.base_index[0]:i + self.base_index[1]], axis=0)
-                data = np.sort(raw[i + self.data_index[0]:i + self.data_index[1]], axis=0)
-                base = np.mean(base[self.chose_index[0]:self.chose_index[1]], axis=0)
-                data = np.mean(data[self.chose_index[0]:self.chose_index[1]], axis=0)
-                out_data = np.r_[out_data, np.reshape(data - base, (1, CHS))]
-                ff_point.append(i)
-        return out_data, raw, bsl, force_flag, ff_point
-
-    def __call__(self, rawdata, save_filename=None, fig_name=None, filter_flag=True, savefig=False):
-        out_data, raw, bsl, force_flag, ff_point = self.__from_rawdata_to_matrix(rawdata)
-        if filter_flag:
-            out_data = butter_bandpass_filter(out_data)
-        print('out_data shape: ', out_data.shape)
-        CHS = out_data.shape[1]
-        figM = (CHS + 1) // 2
-        fig, ax = plt.subplots(figM, 2, sharex='all')
-        ax = ax.flatten()
-        for ch in range(CHS):
-            ax[ch].plot(raw[:, ch], label='raw')
-            ax[ch].plot(bsl[:, ch], label='baseline')
-            ax[ch].plot(raw[0, ch] + force_flag * 100, label='forceflag')
-            for i in ff_point:
-                ax[ch].plot(np.arange(i + self.base_index[0], i + self.base_index[1]),
-                            raw[i + self.base_index[0]:i + self.base_index[1]][:, ch], color='black', marker='o')
-                ax[ch].plot(np.arange(i + self.data_index[0], i + self.data_index[1]),
-                            raw[i + self.data_index[0]:i + self.data_index[1]][:, ch], color='red', marker='o')
-            ax[ch].legend()
-            ax[ch].set_title('CH' + str(ch + 1))
-        plt.suptitle(fig_name)
-        plt.savefig(save_filename[:-4] + '-raw.jpg') if savefig else None
-        fig, ax = plt.subplots(1, 1)
-        ax.plot(out_data, '-o')
-        ax.legend(tuple(('CH' + str(ch + 1) for ch in range(out_data.shape[1]))))
-        ax.set_ylabel('ADC')
-        ax.grid(True)
-        plt.suptitle(fig_name)
-        if save_filename is not None:
-            save_folder = os.path.dirname(save_filename)
-            if not os.path.exists(save_folder):
-                os.makedirs(save_folder)
-                print(save_filename + ' is created')
-            np.savetxt(save_filename, out_data, fmt='%+6.1f', delimiter='\t')
-            print(save_filename + ' file saved successfully')
-            plt.savefig(save_filename[:-4] + '-dot.jpg') if savefig else None
-        else:
-            warnings.warn('warning message: filename not assigned, so not saved')
-        plt.show()
-        return out_data
-
-    def __get_front_rear_points(self, data_norm, peak_pos, template_len, ratio, front_ch, rear_ch):
-        """
-        private for generate_template
-
-        :param data_norm:
-        :param peak_pos:
-        :param template_len:
-        :param ratio:
-        :param front_ch:
-        :param rear_ch:
-        :return:
-        """
-        if isinstance(template_len, int):  # 优先使用 template_len
-            for front_points in range(data_norm.shape[0]):
-                rear_points = template_len - (peak_pos[rear_ch] - peak_pos[front_ch]) - front_points - 1
-                if rear_points + peak_pos[rear_ch] >= data_norm.shape[0] or \
-                        peak_pos[front_ch] - front_points >= peak_pos[0]:
-                    continue
-                if data_norm[peak_pos[front_ch] - front_points, 0] <= \
-                        data_norm[peak_pos[rear_ch] + rear_points, -1]:
-                    print('template_len:', template_len, ', front_points:', front_points - 1, ', rear_points:',
-                          rear_points)
-                    return template_len, front_points, rear_points
-            print('error: template_len=', template_len, ', 但数据没有这么长')
-            exit()
-        else:  # 然后使用ratio
-            front_points = peak_pos[0]
-            for i in range(peak_pos[0]):
-                if data_norm[peak_pos[0] - i, 0] < data_norm[peak_pos[0], 0] * ratio:
-                    front_points = i
-                    break
-            rear_points = data_norm.shape[0] - peak_pos[-1] - 1
-            for i in range(data_norm.shape[0] - peak_pos[-1]):
-                if data_norm[peak_pos[-1] + i, -1] < data_norm[peak_pos[-1], -1] * ratio:
-                    rear_points = i + 1
-                    break
-            template_len = peak_pos[-1] - peak_pos[0] + rear_points + front_points - 1
-            print('template_len:', template_len, ', front_points:', front_points, ', rear_points:', rear_points)
-            return template_len, front_points, rear_points
-
-    def __get_mean_tempalte(self, data_list, peak_poses, template_len, front_points, rear_points, front_ch, rear_ch):
-        """
-        private for generate_template
-
-        :param data_list:
-        :param peak_poses:
-        :param template_len:
-        :param front_points:
-        :param rear_points:
-        :param front_ch:
-        :param rear_ch:
-        :return:
-        """
-        chs = data_list[0].shape[1]
-        template = np.zeros(shape=(template_len, chs))
-        for i, data in enumerate(data_list):
-            x = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, front_ch] - front_points + template_len)
-            for ch in range(chs):
-                xp = np.arange(peak_poses[i, front_ch] - front_points, peak_poses[i, rear_ch] + rear_points + 1)
-                yp = data[peak_poses[i, front_ch] - front_points:peak_poses[i, rear_ch] + rear_points + 1, ch]
-                template[:, ch] += np.interp(x * xp.shape[0] / template_len, xp, yp)
-        return (template / np.max(template, axis=0) * 1024).astype(np.int)
-
-    def generate_public_template(self, files, template_filename=None, template_len=None,
-                                 ratio=0.5, factor=1, front_ch=0, rear_ch=-1):
-        """
-        使用一系列的打点提取文件，生成公共模板
-        :param files: 一系列打点提取之后的文件
-        :param template_filename: 为None时不保存
-        :param template_len: 模板的长度，如果不为None，ratio不生效
-        :param ratio: 边缘通道两侧大于峰值的ratio
-        :param factor: 系数 如400/2.67*100，为1时表示ADC,否则为μV/100g
-        :param front_ch: 模板的设计时选择的对齐前面个通道，默认为第一通道
-        :param rear_ch:模板的设计时选择的对齐后面个通道，默认为最后通道
-        :return:
-        """
-
-        if len(files) == 0:
-            print('错误：传入的files为空')
-            exit()
-        data_list = []
-        ylabel = 'ADC' if factor == 1 else 'μV'
-        for fid, file in enumerate(files):
-            print(fid, file)
-            with open(file, 'r', encoding='utf-8') as f:
-                fn = get_fig_title(file, (-1,))
-                data = np.array(pd.read_csv(f, header=None, skiprows=0, delimiter='\t'))
-                f.close()
-            np.set_printoptions(precision=3, suppress=True)
-            print('cali_coef:', 400 / data.max(0))
-            peak_pos = np.argmax(data, axis=0)
-            data_norm = data / np.max(data, axis=0) * 1024
-            data_list.append(data_norm)
-            try:
-                peak_poses = np.r_[(peak_poses, np.reshape(peak_pos, newshape=(1, -1)))]
-            except:  # 第一个文件执行
-                middle_ch = peak_pos.shape[0] // 2
-                peak_pos_default = peak_pos[middle_ch]
-                peak_poses = np.reshape(peak_pos, newshape=(1, -1))
-            zero_point = peak_pos_default - peak_pos[middle_ch]
-            x = np.arange(zero_point, zero_point + data.shape[0])
-            # 画图
-            colori = fid % len(self._colors)
-            makeri = (fid // len(self._markers)) % len(self._markers)
-            plt.figure(1)
-            plt.plot(x, data[:, :-1] * factor, marker=self._markers[makeri], color=self._colors[colori])
-            plt.plot(x, data[:, -1] * factor, marker=self._markers[makeri], color=self._colors[colori], label=fn)
-            plt.ylabel(ylabel)
-            plt.legend()
-            plt.title('密集打点数据--未归一化')
-            plt.figure(2)
-            plt.plot(x, data_norm[:, :-1] * factor, marker=self._markers[makeri], color=self._colors[colori])
-            plt.plot(x, data_norm[:, -1] * factor, marker=self._markers[makeri], color=self._colors[colori], label=fn)
-            plt.legend()
-            plt.title('密集打点数据--归一化--1024')
-        fid = np.argmax(peak_poses[:, -1] - peak_poses[:, 0])
-        data_norm = data_list[fid]
-        peak_pos = peak_poses[fid]
-        template_len, front_points, rear_points = self.__get_front_rear_points(
-            data_norm, peak_pos, template_len, ratio, front_ch, rear_ch)
-        template = self.__get_mean_tempalte(data_list, peak_poses, template_len, front_points, rear_points, front_ch,
-                                            rear_ch)
-        print("template shape:", template.shape)
-        plt.figure(3)
-        plt.plot(template, '-o')
-        plt.title('mean template')
-        plt.show()
-        # 保存template到txt
-        if template_filename is not None:
-            save_folder = os.path.dirname(template_filename)
-            if not os.path.exists(save_folder) and save_folder != '':
-                # print(save_folder)
-                os.makedirs(save_folder)
-                print(save_filename + ' is created')
-            np.savetxt(template_filename, template, fmt='%+6d', delimiter='\t')
-            print('template shape: ', template.shape)
-        else:
-            warnings.warn('warning message: filename not assigned, so not saved')
-        return template
-
-    def read_and_compare_template(self, files):
-        """
-        画图比较模板
-        :param files:
-        :return:
-        """
-        for fid, file in enumerate(files):
-            print(fid, file)
-            with open(file, 'r', encoding='utf-8') as f:
-                fn = get_fig_title(file, (-1,))
-                data = np.array(pd.read_csv(f, header=None, skiprows=0, delimiter='\t'))
-                f.close()
-            zero_point = -data[:, (data.shape[1] + 1) // 2].argmax()
-            x_ord = np.arange(zero_point, zero_point + data.shape[0])
-            colori = fid % len(self._colors)
-            makeri = (fid * (len(self._markers) - 1) // len(self._markers)) % len(self._markers)
-            plt.plot(x_ord, data[:, :-1], marker=self._markers[makeri], color=self._colors[colori])
-            plt.plot(x_ord, data[:, -1], marker=self._markers[makeri], color=self._colors[colori], label=fn)
-        plt.legend()
-        plt.title('template compare')
-        plt.show()
-        return None
-
-
-def get_fig_title(filename='test.txt', layers=(-1,)):
-    """
-    目的：有些绝对路径的文件名太长了，画图的时候想要一个短的文件名
-    获取文件名,用于画图的title，以及有时候生成存
-
-    Carry Chenli
-    :param filename: 完整的filename,一般很长
-    :param layers:  用'\'split之后，选择使用那些layer，先父目录layer，再子目录
-    :return: out_str: 较短的文件名
-    """
-    strs = filename.split('\\')
-    out_str = ''
-    for layer in layers:
-        if layer == -1:
-            strs_last = strs[layer].split('.')
-            for s in strs_last[:-1]:
-                out_str += s
-        else:
-            out_str += strs[layer] + '_'
-    return out_str

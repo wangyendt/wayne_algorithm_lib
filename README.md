@@ -1,12 +1,23 @@
-新增环境变量
-PYTHONPATH: ndtpy所在文件夹的全路径
+## This is a useful tool mainly includes:
 
-如何安装 pyUserInput?
+1. Dectorator
+2. Data Structure
+3. Data Processing
+4. Mathematics
 
-1. 从网上下载 pyHook-1.5.1-cp36-cp36m-win_amd64.whl 和 PyUserInput-0.1.11.tar.gz 这两个库文件
-- pyHook 下载网址：https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyhook
-- PyUserInput 下载网址：https://pypi.org/project/PyUserInput/#files
+For more details such as table of content, take a look at the head comments in tools.py
 
-2. 在命令行中输入:
-- pip install path/pyHook-1.5.1-cp36-cp36m-win_amd64.whl
-- pip install path/PyUserInput-0.1.11.tar.gz
+## Installation
+Try to run "pip install pywayne" in your commond line tool.
+
+## How to use
+from pywayne.tools import *
+
+## P.S.
+Feel free to contact me whenever you need help using this tool.
+
+e-mail: wang121ye@hotmail.com
+
+Pull-requests are always welcomed.
+
+Hopefully this may help you somewhere!

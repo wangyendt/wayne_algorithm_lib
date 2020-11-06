@@ -16,13 +16,13 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pywayne",
-    version="0.0.1",
-    author="NDTers",
-    author_email="wangye.hope@gmail.com",
-    description="Some tools for common use",
+    version="1.0.0.0.1",
+    author="Wayne",
+    author_email="wang121ye@hotmail.com",
+    description="Some useful tools",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/pypa/sampleproject",
+    url="https://github.com/wangyendt/wangye_algorithm_lib",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
