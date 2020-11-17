@@ -708,7 +708,7 @@ def butter_bandpass_filter(x, order=2, wn=0.2, btype='low'):
     """
     b, a = signal.butter(N=order, Wn=wn, btype=btype)
     return np.apply_along_axis(
-        lambda y: sp.filtfilt(b, a, y),
+        lambda y: signal.filtfilt(b, a, y),
         0, x
     )
 
