@@ -350,6 +350,17 @@ def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     return _files
 
 
+def count_file_lines(file):
+    def block(f_: 'File', size_=65536):
+        while True:
+            b = f_.read(size_)
+            if not b: break
+            yield b
+
+    with open(file, 'r', encoding='utf-8', errors='ignore') as f:
+        return sum(bl.count('\n') for bl in block(f))
+
+
 class GlobalHotKeys:
     """
     Register a key using the register() method, or using the @register decorator

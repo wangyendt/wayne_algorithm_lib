@@ -19,11 +19,13 @@ b. (class) UnionFind: typical union find set
 ### 3. Useful Tools
 a. (function) list_all_files: list all the files in all sub-directories, can specify keywords including and outliers excluding
 
-b. (class) GlobalHotKeys: used for keyboard listening
+b. (function) count_file_lines: count the line number of file of arbitary size
 
-c. (class) GuiOperation: used for gui operations
+c. (class) GlobalHotKeys: used for keyboard listening
 
-d. (class) XmlIO: used to read/write xml files
+d. (class) GuiOperation: used for gui operations
+
+e. (class) XmlIO: used to read/write xml files
 
 ### 4. Data Processing
 a. (function) peak_det: detect peak with O(n) time complexity, easy to extend
