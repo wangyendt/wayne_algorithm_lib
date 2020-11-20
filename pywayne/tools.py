@@ -64,8 +64,7 @@ except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
-
-# matplotlib.use('TkAgg')  # for mac
+matplotlib.use('QT5Agg')  # for mac, TkAgg
 
 
 # Wayne:

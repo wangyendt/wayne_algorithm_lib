@@ -25,7 +25,7 @@ install_reqs = parse_requirements('requirements.txt')
 
 setuptools.setup(
     name="pywayne",
-    version="1.0.0.0.4",
+    version="1.0.0.0.5",
     author="Wayne",
     author_email="wang121ye@hotmail.com",
     description="Some useful tools",
