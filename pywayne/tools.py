@@ -27,7 +27,11 @@ import scipy as sp
 from scipy import signal
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-import pygame
+
+try:
+    import pygame
+except ImportError:
+    logging.warn('Try pip install pygame')
 
 try:
     import ctypes
@@ -64,7 +68,10 @@ except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
-matplotlib.use('QT5Agg')  # for mac, TkAgg
+try:
+    matplotlib.use('QT5Agg')  # for mac, TkAgg
+except:
+    logging.warn('backend qt5 not supported')
 
 
 # Wayne:
