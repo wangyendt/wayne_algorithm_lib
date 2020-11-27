@@ -26,10 +26,10 @@ import seaborn as sns
 import scipy as sp
 from scipy import signal
 
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-
 try:
     import pygame
+
+    os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 except ImportError:
     logging.warn('Try pip install pygame')
 
