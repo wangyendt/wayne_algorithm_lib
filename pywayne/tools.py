@@ -710,7 +710,7 @@ def peak_det(v, delta, x=None):
     return np.array(maxtab), np.array(mintab)
 
 
-def butter_bandpass_filter(x, order=2, wn=0.2, btype='low'):
+def butter_bandpass_filter(x, order=2, wn=0.2, btype='lowpass'):
     """
     ButterWorth 滤波器
 
