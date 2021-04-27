@@ -12,5 +12,6 @@ rm -rf dist
 rm -rf pywayne.egg-info
 
 pip uninstall pywayne -y
+pip install -U -i https://pypi.org/simple pywayne
 
 read -p "Press any key to resume ..."
