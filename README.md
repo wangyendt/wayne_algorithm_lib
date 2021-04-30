@@ -21,11 +21,13 @@ a. (function) list_all_files: list all the files in all sub-directories, can spe
 
 b. (function) count_file_lines: count the line number of file of arbitary size
 
-c. (class) GlobalHotKeys: used for keyboard listening
+c. (function) leader_speech: generate some random leader_speech
 
-d. (class) GuiOperation: used for gui operations
+d. (class) GlobalHotKeys: used for keyboard listening
 
-e. (class) XmlIO: used to read/write xml files
+e. (class) GuiOperation: used for gui operations
+
+f. (class) XmlIO: used to read/write xml files
 
 ### 4. Data Processing
 a. (function) peak_det: detect peak with O(n) time complexity, easy to extend
