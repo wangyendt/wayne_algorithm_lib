@@ -412,6 +412,15 @@ def leader_speech():
     return result
 
 
+def compose_funcs(*funcs):
+    if funcs:
+        return functools.reduce(
+            lambda f, g: lambda *args, **kwargs: f(g(*args, **kwargs)), funcs
+        )
+    else:
+        raise ValueError('Composition of empty sequence not supported!')
+
+
 class GlobalHotKeys:
     """
     Register a key using the register() method, or using the @register decorator

@@ -23,11 +23,13 @@ b. (function) count_file_lines: count the line number of file of arbitary size
 
 c. (function) leader_speech: generate some random leader_speech
 
-d. (class) GlobalHotKeys: used for keyboard listening
+d. (function) compose_funcs: used for composing several functions
 
-e. (class) GuiOperation: used for gui operations
+e. (class) GlobalHotKeys: used for keyboard listening
 
-f. (class) XmlIO: used to read/write xml files
+f. (class) GuiOperation: used for gui operations
+
+g. (class) XmlIO: used to read/write xml files
 
 ### 4. Data Processing
 a. (function) peak_det: detect peak with O(n) time complexity, easy to extend
