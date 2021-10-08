@@ -9,7 +9,6 @@ scipy
 h5py
 pygame
 
-pywin32
 pillow
 pyqt5
 requests
