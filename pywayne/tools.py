@@ -988,7 +988,7 @@ def get_all_factors(n: int) -> list:
     :param n: A positive number
     :return: a list which contains all factors of number n
     """
-    return list(set(reduce(list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
+    return list(set(functools.reduce(list.__add__, ([i, n // i] for i in range(1, int(n ** 0.5) + 1) if n % i == 0))))
 
 
 def digitCount(n, k):
