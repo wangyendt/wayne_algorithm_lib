@@ -7,10 +7,8 @@ pandas
 pyperclip
 scipy
 h5py
-pygame
 
 pillow
-pyqt5
 requests
 boto3
 botocore
