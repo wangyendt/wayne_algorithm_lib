@@ -6,6 +6,7 @@ __all__ = [
     'gui',
     'math',
     'data_structure',
+    'plot',
     'tt_api',
     'ocs_api',
 ]

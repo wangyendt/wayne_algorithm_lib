@@ -13,7 +13,7 @@
 import collections
 
 import numpy as np
-from scipy import signal
+from scipy.signal import butter, lfilter, filtfilt
 
 
 def peak_det(v, delta, x=None):
@@ -91,7 +91,7 @@ def peak_det(v, delta, x=None):
     return np.array(maxtab), np.array(mintab)
 
 
-def butter_bandpass_filter(x, order=2, wn=0.2, btype='lowpass'):
+def butter_bandpass_filter(x, order=2, lo=0.1, hi=10, fs=0, btype='lowpass', realtime=False):
     """
     ButterWorth 滤波器
 
@@ -100,13 +100,30 @@ def butter_bandpass_filter(x, order=2, wn=0.2, btype='lowpass'):
 
     :param x: 待滤波矩阵, 2d-array
     :param order: butterworth滤波器阶数
-    :param wn: wn系数，权衡失真和光滑
+    :param lo: 下限
+    :param hi: 上限
+    :param fs: 采样频率，默认为0，如果不为0，则对lo和hi进行变换
     :param btype: butterworth滤波器种类，默认为低通滤波
+    :param realtime: 是否采用在线滤波器
     :return: 滤波后矩阵, 2d-array
     """
-    b, a = signal.butter(N=order, Wn=wn, btype=btype)
+    if fs:
+        lo = lo / (fs / 2)
+        hi = hi / (fs / 2)
+    if btype == 'lowpass':
+        wn = lo
+    elif btype == 'highpass':
+        wn = hi
+    elif btype == 'bandpass':
+        wn = [lo, hi]
+    elif btype == 'bandstop':
+        wn = [lo, hi]
+    else:
+        raise ValueError(f'btype cannot be {btype}')
+    b, a = butter(N=order, Wn=wn, btype=btype)
+    filter = filtfilt if not realtime else lfilter
     return np.apply_along_axis(
-        lambda y: signal.filtfilt(b, a, y),
+        lambda y: filter(b, a, y),
         0, x
     )
 
