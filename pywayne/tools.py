@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import time
+from typing import *
 
 import matplotlib.pyplot as plt
 
@@ -11,6 +12,7 @@ try:
     from PIL import Image
 except ImportError:
     logging.warn('Try pip install Pillow')
+
 
 # try:
 #     from PyQt5.QtCore import *
@@ -38,7 +40,7 @@ def func_timer(func):
     def wrapper(*args, **kw):
         start = time.time()
         r = func(*args, **kw)
-        print(f'{func.__name__} excute in {time.time() - start:.3f} s')
+        print(f'{func.__name__} excuted in {time.time() - start:.3f} s')
         return r
 
     return wrapper
@@ -131,7 +133,8 @@ def binding_press_release(func_dict: dict):
     return binding_press_release_decorator
 
 
-def list_all_files(root: str, keys=[], outliers=[], full_path=False):
+@func_timer
+def list_all_files(root: str, keys_and=[], keys_or=[], outliers=[], full_path=False):
     """
     列出某个文件下所有文件的全路径
 
@@ -139,7 +142,8 @@ def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     Datetime: 2019/4/16 18:03
 
     :param root: 根目录
-    :param keys: 所有关键字
+    :param keys_and: 必须出现的关键字
+    :param keys_or: 至少出现一次的关键字
     :param outliers: 所有排除关键字
     :param full_path: 是否返回全路径，True为全路径
     :return:
@@ -147,13 +151,14 @@ def list_all_files(root: str, keys=[], outliers=[], full_path=False):
     """
     _files = []
     _list = os.listdir(root)
-    for i in range(len(_list)):
-        path = os.path.join(root, _list[i])
+    for i, _list_i in enumerate(_list):
+        path = os.path.join(root, _list_i)
         if os.path.isdir(path):
-            _files.extend(list_all_files(path, keys, outliers, full_path))
-        if os.path.isfile(path) \
-                and all([k in path for k in keys]) \
-                and not any([o in path for o in outliers]):
+            _files.extend(list_all_files(path, keys_and, keys_or, outliers, full_path))
+        if (os.path.isfile(path)
+                and all(k in path for k in keys_and)
+                and any(k in path for k in keys_or)
+                and not any(o in path for o in outliers)):
             _files.append(os.path.abspath(path) if full_path else path)
     return _files
 
