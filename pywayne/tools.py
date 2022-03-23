@@ -133,7 +133,6 @@ def binding_press_release(func_dict: dict):
     return binding_press_release_decorator
 
 
-@func_timer
 def list_all_files(root: str, keys_and=[], keys_or=[], outliers=[], full_path=False):
     """
     列出某个文件下所有文件的全路径
