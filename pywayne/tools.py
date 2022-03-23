@@ -156,7 +156,7 @@ def list_all_files(root: str, keys_and=[], keys_or=[], outliers=[], full_path=Fa
             _files.extend(list_all_files(path, keys_and, keys_or, outliers, full_path))
         if (os.path.isfile(path)
                 and all(k in path for k in keys_and)
-                and any(k in path for k in keys_or)
+                and (not keys_or or any(k in path for k in keys_or))
                 and not any(o in path for o in outliers)):
             _files.append(os.path.abspath(path) if full_path else path)
     return _files
