@@ -111,9 +111,9 @@ def butter_bandpass_filter(x, order=2, lo=0.1, hi=10, fs=0, btype='lowpass', rea
         lo = lo / (fs / 2)
         hi = hi / (fs / 2)
     if btype == 'lowpass':
-        wn = lo
-    elif btype == 'highpass':
         wn = hi
+    elif btype == 'highpass':
+        wn = lo
     elif btype == 'bandpass':
         wn = [lo, hi]
     elif btype == 'bandstop':
