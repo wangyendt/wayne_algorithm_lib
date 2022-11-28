@@ -11,6 +11,9 @@
 """
 
 import collections
+import math
+
+from sortedcontainers import SortedList
 
 import numpy as np
 from scipy.signal import butter, lfilter, filtfilt
@@ -150,6 +153,34 @@ def find_extremum_in_sliding_window(data: list, k: int) -> list:
     return retMin, retMax
 
 
+class FindSlidingWindowExtremum:
+    def __init__(self, win: int, find_max: bool):
+        self._win = win
+        self._cnt = 0
+        self._deque = collections.deque()
+        self._find_max = find_max
+
+    def apply(self, val):
+        count = 0
+        while self._deque and ((self._deque[-1][0] < val) if self._find_max else (self._deque[-1][0] > val)):
+            count += self._deque[-1][1] + 1
+            self._deque.pop()
+        self._deque.append([val, count])
+        self._cnt = min(self._cnt + 1, self._win + 1)
+        if self._cnt > self._win:
+            self._pop()
+        if self._cnt >= self._win:
+            return self._deque[0][0]
+        else:
+            return 0.0
+
+    def _pop(self):
+        if self._deque[0][1] > 0:
+            self._deque[0][1] -= 1
+        else:
+            self._deque.popleft()
+
+
 class FindLocalExtremum:
     """
     本类用于寻找局部极值
@@ -237,6 +268,113 @@ class FindLocalExtremum:
         return local_diff, local_gap, min_slp, max_slp, local_extreme_real_value
 
 
+class MKAverage:
+
+    def __init__(self, m: int, k: int):
+        self._m, self._k = m, k
+        self._deque = collections.deque()
+        self._sl = SortedList()
+        self._total = self._first_k = self._last_k = 0
+
+    def apply(self, val: float) -> float:
+        self._total += val
+        self._deque.append(val)
+        index = self._sl.bisect_left(val)
+        if index < self._k:
+            self._first_k += val
+            if len(self._sl) >= self._k:
+                self._first_k -= self._sl[self._k - 1]
+        if index >= len(self._sl) + 1 - self._k:
+            self._last_k += val
+            if len(self._sl) >= self._k:
+                self._last_k -= self._sl[-self._k]
+        self._sl.add(val)
+        if len(self._deque) > self._m:
+            val = self._deque.popleft()
+            self._total -= val
+            index = self._sl.index(val)
+            if index < self._k:
+                self._first_k -= val
+                self._first_k += self._sl[self._k]
+            elif index >= len(self._sl) - self._k:
+                self._last_k -= val
+                self._last_k += self._sl[-self._k - 1]
+            self._sl.remove(val)
+        if len(self._sl) < self._m:
+            return 0.0
+        else:
+            return self._calculate_mk_average()
+
+    def _calculate_mk_average(self) -> float:
+        return (self._total - self._first_k - self._last_k) / (self._m - 2 * self._k)
+
+
+class WelfordStd:
+    def __init__(self, win: int):
+        self._avg = 0.0
+        self._var = 0.0
+        self._std = 0.0
+        self._win = win
+        self._cnt = 0
+        self._deque = collections.deque()
+
+    def apply(self, val):
+        self._deque.append(val)
+        if len(self._deque) > self._win + 1:
+            self._deque.popleft()
+        old_data = self._deque[0]
+        pre_avg = self._avg
+        if self._cnt < self._win:
+            self._avg += (val - pre_avg) / (self._cnt + 1)
+            self._var += (val - self._avg) * (val - pre_avg)
+        else:
+            self._avg += (val - old_data) / self._win
+            self._var += (val - old_data) * (val - self._avg + old_data - pre_avg)
+        if self._cnt >= self._win - 1:
+            self._std = math.sqrt(max(self._var, 0.0) / (self._win - 1))
+        else:
+            self._std = 0.0
+        self._cnt = min(self._cnt + 1, self._win + 2)
+        return self._std
+
+    def get_cnt(self):
+        return self._cnt
+
+
+class OneEuroFilter:
+    """
+    常用于pose tracking等场景
+    低速时去抖，高速时紧跟
+    https://gery.casiez.net/1euro/
+    https://gery.casiez.net/1euro/InteractiveDemo/
+    """
+
+    def __init__(self, te, mincutoff=1.0, beta=0.007, dcutoff=1.0):
+        self._val = None
+        self._dx = 0
+        self._te = te
+        self._mincutoff = mincutoff
+        self._beta = beta
+        self._dcutoff = dcutoff
+        self._alpha = self._alpha(self._mincutoff)
+        self._dalpha = self._alpha(self._dcutoff)
+
+    def _alpha(self, cutoff):
+        tau = 1.0 / (2 * np.pi * cutoff)
+        return 1.0 / (1.0 + tau / self._te)
+
+    def apply(self, val: float, te: float) -> float:
+        result = val
+        if self._val is not None:
+            edx = (val - self._val) / te
+            self._dx = self._dx + (self._dalpha * (edx - self._dx))
+            cutoff = self._mincutoff + self._beta * abs(self._dx)
+            self._alpha = self._alpha(cutoff)
+            result = self._val + self._alpha * (val - self._val)
+        self._val = result
+        return result
+
+
 class CurveSimilarity:
     """
     用于计算曲线x和曲线y的相似度
@@ -320,37 +458,3 @@ class CurveSimilarity:
             return np.squeeze([
                 np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
             ])
-
-
-class OneEuroFilter:
-    """
-    常用于pose tracking等场景
-    低速时去抖，高速时紧跟
-    https://gery.casiez.net/1euro/
-    https://gery.casiez.net/1euro/InteractiveDemo/
-    """
-
-    def __init__(self, te, mincutoff=1.0, beta=0.007, dcutoff=1.0):
-        self.x = None
-        self.dx = 0
-        self.te = te
-        self.mincutoff = mincutoff
-        self.beta = beta
-        self.dcutoff = dcutoff
-        self.alpha = self._alpha(self.mincutoff)
-        self.dalpha = self._alpha(self.dcutoff)
-
-    def _alpha(self, cutoff):
-        tau = 1.0 / (2 * np.pi * cutoff)
-        return 1.0 / (1.0 + tau / self.te)
-
-    def predict(self, x, te):
-        result = x
-        if self.x is not None:
-            edx = (x - self.x) / te
-            self.dx = self.dx + (self.dalpha * (edx - self.dx))
-            cutoff = self.mincutoff + self.beta * abs(self.dx)
-            self.alpha = self._alpha(cutoff)
-            result = self.x + self.alpha * (x - self.x)
-        self.x = result
-        return result

@@ -7,6 +7,7 @@ pandas
 pyperclip
 scipy
 h5py
+sortedcontainers
 
 pillow
 requests
