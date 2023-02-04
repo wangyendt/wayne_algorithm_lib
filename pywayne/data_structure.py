@@ -179,8 +179,8 @@ class XmlIO:
         root = tree.getroot()
 
         def helper(_tree: ET.Element, _is_root=True):
-            if not _tree: return [[{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]]
-            ret = [] if _is_root else [{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n')}]
+            if not _tree: return [[{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n') if _tree.text else ''}]]
+            ret = [] if _is_root else [{'tag': _tree.tag, 'attrib': _tree.attrib, 'text': _tree.text.strip('\t\n') if _tree.text else ''}]
             return [ret + res for ch in _tree for res in helper(ch, False)]
 
         c_tree = ConditionTree(root.tag)
