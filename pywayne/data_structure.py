@@ -196,8 +196,8 @@ class XmlIO:
         _tree._setroot(_root)
 
         def helper(etree, c_tree):
-            if not c_tree.children and c_tree.kvp:
-                for k, v in c_tree.kvp.items():
+            if not c_tree.children and c_tree.attribute:
+                for k, v in c_tree.attribute.items():
                     ET.SubElement(etree, k).text = v
             else:
                 for ch in c_tree.children:
