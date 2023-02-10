@@ -6,8 +6,6 @@
 - gui
 - math
 - tools
-- tt_api
-- ocs_api
 
 # Installation
 Try to run "pip install pywayne" in your commond line tool.
