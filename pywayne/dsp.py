@@ -375,6 +375,37 @@ class OneEuroFilter:
         return result
 
 
+class CalcEnergy:
+    def __init__(self, alpha=10, beta=20, gamma=1):
+        """
+        Calculate energy of given signal
+        :param alpha: local mean window
+        :param beta: remote diff window
+        :param gamma: power of energy, currently set to 1
+        """
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
+    def apply(self, data: np.ndarray):
+        """
+        Apply energy calculator w.r.t. input data
+        :param data: N*d input array
+        :return: N*d energy
+        """
+        if len(data.shape) == 1:
+            data = data.reshape((-1, 1))
+        energy = np.vstack((
+            np.zeros((self.alpha + self.beta - 1, data.shape[1])),
+            np.apply_along_axis(
+                lambda x: np.convolve(np.abs(x), np.ones(self.alpha) / self.alpha, 'valid'),
+                0,
+                data[self.beta:] - data[:-self.beta]
+            )
+        ))
+        return energy
+
+
 class CurveSimilarity:
     """
     用于计算曲线x和曲线y的相似度
