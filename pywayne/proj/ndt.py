@@ -309,7 +309,7 @@ class ForceSensorExtractRollingData:
             """
             正态性检验:
 
-            1. Shapiro-Wilk test
+            1. Shapiro-Wilk test
             方法：scipy.stats.shapiro(x)
             官方文档：SciPy v1.1.0 Reference Guide
             参数：x - 待检验数据
