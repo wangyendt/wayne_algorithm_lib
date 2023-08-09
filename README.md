@@ -1,4 +1,4 @@
-# This is a useful tool created by Wayne
+# This is a useful tool for python and c++ (pybind)
 
 ## Currently includes:
 - data-structure
