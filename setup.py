@@ -10,6 +10,7 @@
 """
 
 import setuptools
+from pywayne.__version__ import __version__
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
@@ -25,7 +26,7 @@ install_reqs = parse_requirements('requirements.txt')
 
 setuptools.setup(
     name="pywayne",
-    version="1.0.0.4.0",
+    version=__version__,
     author="Wayne",
     author_email="wang121ye@hotmail.com",
     description="Some useful tools",

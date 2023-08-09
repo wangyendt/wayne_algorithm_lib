@@ -44,16 +44,16 @@ def quaternion_decompose(quaternion: np.ndarray) -> Tuple[np.ndarray, np.ndarray
 
     Examples
     --------
-    >>> a = np.array([np.sqrt(2) / 2, np.sqrt(2) / 2, 0, 0])[:, None]
+    >>> a = np.array([np.sqrt(2) / 2, np.sqrt(2) / 2, 0, 0])
     >>> print(quaternion_decompose(a))
     (array([1.57079633]), array([0.]), array([1.57079633]))
     """
+    if type(quaternion) is list:
+        quaternion = np.array(quaternion)
     if len(quaternion.shape) == 1:
         assert quaternion.shape[0] == 4
-        quaternion = quaternion[:, None]
+        quaternion = quaternion[None, :]
     else:
-        if quaternion.shape == (4, 1):
-            quaternion = quaternion.T
         assert len(quaternion.shape) == 2 and quaternion.shape[1] == 4
     assert np.all(np.linalg.norm(quaternion, axis=1) == 1)
     angle_all = 2 * np.arccos(np.abs(quaternion[:, 0]))

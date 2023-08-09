@@ -10,12 +10,13 @@ import os
 import sys
 from datetime import datetime
 sys.path.insert(0, os.path.abspath('../../pywayne' if sys.platform.startswith('win') else '../..'))
+from pywayne.__version__ import __version__
 
 
 project = 'pywayne'
 copyright = '2023, Wayne'
 author = 'Wayne'
-release = '1.0.0.4.0'
+release = __version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
