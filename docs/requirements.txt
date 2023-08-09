@@ -17,3 +17,4 @@ requests
 boto3
 botocore
 setuptools
+qmt
