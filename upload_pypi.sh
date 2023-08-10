@@ -3,7 +3,7 @@ rm -rf dist
 rm -rf pywayne.egg-info
 
 python setup.py sdist bdist_wheel
-twine upload -u wangye_hope -p haliluya314159 dist/*
+twine upload -u wangye_hope -p $1 dist/*
 
 read -p "Press any key to resume ..."
 

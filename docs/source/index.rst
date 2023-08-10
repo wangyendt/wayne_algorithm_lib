@@ -1,9 +1,18 @@
 pywayne: Useful tools for python and c++
 ========================================
 
+
+Installation
+------------
+
+.. code-block:: bash
+
+   pip install -U pywayne
+
+
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: modules:
 
    ahrs
    calibration
