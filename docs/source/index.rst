@@ -1,4 +1,4 @@
-pywayne: Useful tools for python and c++
+pywayne: A useful tool for python and c++
 ========================================
 
 
