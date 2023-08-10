@@ -17,6 +17,9 @@ files = list_all_files(path_to_root)
 
 ...
 
+# Documentation
+https://wayne-algorithm-lib.readthedocs.io/
+
 # P.S.
 Feel free to contact me whenever you need help using this tool.
 
