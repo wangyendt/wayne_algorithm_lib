@@ -56,7 +56,7 @@ def quaternion_decompose(quaternion: np.ndarray) -> Tuple[np.ndarray, np.ndarray
         quaternion = quaternion[None, :]
     else:
         assert len(quaternion.shape) == 2 and quaternion.shape[1] == 4
-    assert np.all(np.linalg.norm(quaternion, axis=1) == 1)
+    assert np.allclose(np.linalg.norm(quaternion, axis=1), 1, atol=1e-6)
     angle_all = 2 * np.arccos(np.abs(quaternion[:, 0]))
     angle_heading = 2 * np.arctan2(np.abs(quaternion[:, 3]), np.abs(quaternion[:, 0]))
     angle_inclination = 2 * np.arccos(np.sqrt(quaternion[:, 0] ** 2 + quaternion[:, 3] ** 2))
@@ -112,7 +112,7 @@ def quaternion_roll_pitch_compensate(quaternion: np.ndarray) -> np.ndarray:
     quaternion = quaternion.squeeze()
     quaternion = quaternion / np.linalg.norm(quaternion)
     q_zyx = qmt.quatFromEulerAngles(qmt.eulerAngles(quaternion, 'xyz', intrinsic=False), 'xyz', intrinsic=False)
-    assert np.allclose(q_zyx, quaternion, atol=1e-5)
+    assert np.allclose(q_zyx, quaternion, atol=1e-6)
     yaw = qmt.eulerAngles(q_zyx, 'xyz', False)[2]
     q_z = np.array([np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)])
     q_yx = qmt.qmult(qmt.qinv(q_z), q_zyx)
