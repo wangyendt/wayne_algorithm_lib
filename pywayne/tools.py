@@ -239,7 +239,7 @@ def compose_funcs(*funcs):
         raise ValueError('Composition of empty sequence not supported!')
 
 
-def disable_print_wrap_and_supress(deal_with_numpy=True, deal_with_pandas=True):
+def disable_print_wrap_and_suppress(deal_with_numpy=True, deal_with_pandas=True):
     if deal_with_numpy:
         import numpy as np
         np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True)
