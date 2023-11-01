@@ -133,44 +133,57 @@ def binding_press_release(func_dict: dict):
     return binding_press_release_decorator
 
 
-def list_all_files(root: str, keys_and=[], keys_or=[], outliers=[], full_path=False):
+def list_all_files(
+        root: str,
+        keys_and: Optional[List[str]] = None,
+        keys_or: Optional[List[str]] = None,
+        outliers: Optional[List[str]] = None,
+        full_path: bool = False
+) -> List[str]:
     """
-    列出某个文件下所有文件的全路径
+    List all file paths under a directory that satisfy given conditions.
 
     Author:   wangye
     Datetime: 2019/4/16 18:03
 
-    :param root: 根目录
-    :param keys_and: 必须出现的关键字
-    :param keys_or: 至少出现一次的关键字
-    :param outliers: 所有排除关键字
-    :param full_path: 是否返回全路径，True为全路径
-    :return:
-            所有根目录下包含关键字的文件全路径
+    :param root: Root directory to start the search from.
+    :param keys_and: List of keywords that must appear in the file paths.
+    :param keys_or: List of keywords where at least one must appear in the file paths.
+    :param outliers: List of keywords to exclude from the file paths.
+    :param full_path: Whether to return the full path or not.
+    :return: List of file paths that satisfy the given conditions.
     """
-    _files = []
-    _list = os.listdir(root)
-    for i, _list_i in enumerate(_list):
-        path = os.path.join(root, _list_i)
+    keys_and = keys_and or []
+    keys_or = keys_or or []
+    outliers = outliers or []
+
+    files = []
+    for item in os.listdir(root):
+        path = os.path.join(root, item)
+
         if os.path.isdir(path):
-            _files.extend(list_all_files(path, keys_and, keys_or, outliers, full_path))
-        if (os.path.isfile(path)
-                and all(k in path for k in keys_and)
-                and (not keys_or or any(k in path for k in keys_or))
-                and not any(o in path for o in outliers)):
-            _files.append(os.path.abspath(path) if full_path else path)
-    return _files
+            files.extend(list_all_files(path, keys_and, keys_or, outliers, full_path))
+
+        if os.path.isfile(path):
+            if (all(key in path for key in keys_and) and
+                    (not keys_or or any(key in path for key in keys_or)) and
+                    not any(outlier in path for outlier in outliers)):
+                files.append(os.path.abspath(path) if full_path else path)
+
+    return files
 
 
-def count_file_lines(file):
-    def block(f_: 'File', size_=65536):
+def count_file_lines(file_path: str) -> int:
+    def read_file_in_blocks(file: IO[str], block_size: int = 65536) -> Generator[str, None, None]:
+        """Read a file in blocks of a given size."""
         while True:
-            b = f_.read(size_)
-            if not b: break
-            yield b
+            block_data = file.read(block_size)
+            if not block_data:
+                break
+            yield block_data
 
-    with open(file, 'r', encoding='utf-8', errors='ignore') as f:
-        return sum(bl.count('\n') for bl in block(f))
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        return sum(block.count('\n') for block in read_file_in_blocks(f))
 
 
 def leader_speech():
@@ -224,3 +237,15 @@ def compose_funcs(*funcs):
         )
     else:
         raise ValueError('Composition of empty sequence not supported!')
+
+
+def disable_print_wrap_and_supress(deal_with_numpy=True, deal_with_pandas=True):
+    if deal_with_numpy:
+        import numpy as np
+        np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True)
+    if deal_with_pandas:
+        import pandas as pd
+        pd.set_option('display.expand_frame_repr', False)
+        pd.set_option('display.max_rows', None)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', None)
