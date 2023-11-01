@@ -49,4 +49,9 @@ setuptools.setup(
     install_requires=install_reqs,
     packages=setuptools.find_packages(),
     python_requires='>=3',
+    scripts=[
+        'bin/gettool',  # shell script
+        'bin/gettool.py'  # python script
+    ]
+
 )
