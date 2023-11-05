@@ -27,7 +27,7 @@ def fetch_tool(tool_name, target_dir=''):
         with open(name_to_path_map_yaml_file, 'r') as f:
             name_to_path_map = yaml.safe_load(f)
         tool_path = name_to_path_map[tool_name]
-        if target_dir is None:
+        if not target_dir:
             target_dir = os.path.join(cwd, tool_path)
         if os.path.exists(target_dir):
             if input(f'{target_dir} already exists, still want to fetch? (Y/N)').lower() != 'y': return
