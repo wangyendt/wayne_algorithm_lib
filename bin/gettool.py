@@ -16,21 +16,30 @@ import os
 import yaml
 
 
-def fetch_tool(tool_name, target_dir=None):
+def fetch_tool(tool_name, target_dir=''):
+    print(f"Fetching tool: {tool_name}")
     cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as temp_dir:
-        subprocess.run(["git", "clone", "--sparse", "https://github.com/wangyendt/cpp_tools", temp_dir])
         os.chdir(temp_dir)
+        subprocess.run(["git", "clone", "--sparse", "https://github.com/wangyendt/cpp_tools", temp_dir])
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.')
         with open(name_to_path_map_yaml_file, 'r') as f:
             name_to_path_map = yaml.safe_load(f)
-        subprocess.run(["git", "sparse-checkout", "set", name_to_path_map[tool_name]])
+        tool_path = name_to_path_map[tool_name]
         if target_dir is None:
-            target_dir = os.path.join(cwd, name_to_path_map[tool_name])
+            target_dir = os.path.join(cwd, tool_path)
+        if os.path.exists(target_dir):
+            if input(f'{target_dir} already exists, still want to fetch? (Y/N)').lower() != 'y': return
+        with open('.gitmodules', 'r') as f:
+            tool_is_submodule = any(f'path = {tool_path}' in line for line in f)
+        if tool_is_submodule:
+            subprocess.run(["git", "submodule", "update", "--init", "--recursive", tool_path])
+        else:
+            subprocess.run(["git", "sparse-checkout", "set", tool_path])
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
-        shutil.copytree(name_to_path_map[tool_name], target_dir)
+        shutil.copytree(tool_path, target_dir)
         print(f"Tool {tool_name} has been copied to {target_dir}")
     os.chdir(cwd)
 
@@ -54,7 +63,6 @@ def main():
 
     fetch_tool(tool_name)
 
-    print(f"Fetching tool: {tool_name}")
     if args.upgrade:
         print("(not implemented yet)")
     if args.force:
