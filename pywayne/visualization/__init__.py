@@ -1,11 +1,15 @@
 # author: wangye(Wayne)
 # license: Apache Licence
-# file: __version__.py
-# time: 2023-08-09-14:03:33
+# file: __init__.py.py
+# time: 2023-11-06-11:14:06
 # contact: wang121ye@hotmail.com
 # site:  wangyendt@github.com
 # software: PyCharm
 # code is far away from bugs.
 
 
-__version__ = "1.0.0.5.1"
+from . import pangolin
+
+__all_ = [
+    'pangolin.py'
+]

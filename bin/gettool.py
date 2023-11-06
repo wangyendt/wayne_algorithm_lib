@@ -16,7 +16,7 @@ import os
 import yaml
 
 
-def fetch_tool(tool_name, target_dir=''):
+def fetch_tool(tool_name, target_dir='', build=False):
     print(f"Fetching tool: {tool_name}")
     cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -29,7 +29,7 @@ def fetch_tool(tool_name, target_dir=''):
         tool_path = name_to_path_map[tool_name]
         if not target_dir:
             target_dir = os.path.join(cwd, tool_path)
-        if os.path.exists(target_dir):
+        if not build and os.path.exists(target_dir):
             if input(f'{target_dir} already exists, still want to fetch? (Y/N)').lower() != 'y': return
         with open('.gitmodules', 'r') as f:
             tool_is_submodule = any(f'path = {tool_path}' in line for line in f)
@@ -37,9 +37,15 @@ def fetch_tool(tool_name, target_dir=''):
             subprocess.run(["git", "submodule", "update", "--init", "--recursive", tool_path])
         else:
             subprocess.run(["git", "sparse-checkout", "set", tool_path])
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir)
-        shutil.copytree(tool_path, target_dir)
+        if build:
+            os.system(f'cd {tool_path} && mkdir -p build && cd build && cmake .. && make -j12')
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            shutil.copytree(f'{tool_path}/lib/', target_dir)
+        else:
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            shutil.copytree(tool_path, target_dir)
         print(f"Tool {tool_name} has been copied to {target_dir}")
     os.chdir(cwd)
 
@@ -49,6 +55,8 @@ def main():
 
     parser.add_argument('name_pos', nargs='?', default=None, help='Name of the tool (positional)')
     parser.add_argument('-n', '--name', default=None, help='Name of the tool')
+    parser.add_argument('-t', '--target_path', default='', type=str, help='Target path for the tool')
+    parser.add_argument('-b', '--build', action='store_true', help='Whether to build lib')
     parser.add_argument('-U', '--upgrade', action='store_true', help='Upgrade the tool')
     parser.add_argument('-f', '--force', action='store_true', help='Force action')
 
@@ -56,12 +64,14 @@ def main():
 
     # 如果通过 -n 或 --name 提供了名称，则使用它，否则使用位置参数提供的名称
     tool_name = args.name if args.name is not None else args.name_pos
+    target_path = args.target_path
+    build = args.build
 
     # 检查是否提供了名称
     if tool_name is None:
         parser.error("the following arguments are required: name")
 
-    fetch_tool(tool_name)
+    fetch_tool(tool_name, target_dir=target_path, build=build)
 
     if args.upgrade:
         print("(not implemented yet)")
