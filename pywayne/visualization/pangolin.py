@@ -10,7 +10,7 @@
 
 import sys
 import subprocess
-from pathlib import Path
+import os
 import importlib
 
 
@@ -22,16 +22,14 @@ class PangolinViewer:
         self.viewer = self._check_lib_exists()
 
     def _check_lib_exists(self):
-        lib_path = Path(__file__).parent / 'lib'
+        lib_path = os.path.join(os.path.dirname(__file__), 'lib')
         sys.path.append(str(lib_path))
         try:
             from pangolin_viewer import PangolinViewer as Viewer
         except ImportError:
-            lib_path.mkdir(parents=True, exist_ok=True)
-            subprocess.run(['sh', '../../bin/gettool', 'pangolin', '-b', '-t', str(lib_path)], check=True)
+            os.makedirs(lib_path, exist_ok=True)
+            subprocess.run(['gettool', 'pangolin', '-b', '-t', str(lib_path)], check=True)
             importlib.invalidate_caches()
-            lib_path = Path(__file__).parent / 'lib'
-            sys.path.append(str(lib_path))
             Viewer = importlib.import_module("pangolin_viewer").PangolinViewer
         return Viewer(self.width, self.height, self.run_on_start)
 
