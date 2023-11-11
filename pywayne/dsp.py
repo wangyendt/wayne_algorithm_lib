@@ -319,22 +319,22 @@ class WelfordStd:
         self._deque = collections.deque()
 
     def apply(self, val):
+        self._cnt = min(self._cnt + 1, self._win + 2)
         self._deque.append(val)
-        if len(self._deque) > self._win + 1:
+        if self._cnt > self._win + 1:
             self._deque.popleft()
         old_data = self._deque[0]
         pre_avg = self._avg
-        if self._cnt < self._win:
-            self._avg += (val - pre_avg) / (self._cnt + 1)
+        if self._cnt <= self._win:
+            self._avg += (val - pre_avg) / self._cnt
             self._var += (val - self._avg) * (val - pre_avg)
         else:
             self._avg += (val - old_data) / self._win
             self._var += (val - old_data) * (val - self._avg + old_data - pre_avg)
-        if self._cnt >= self._win - 1:
+        if self._cnt >= self._win:
             self._std = math.sqrt(max(self._var, 0.0) / (self._win - 1))
         else:
-            self._std = 0.0
-        self._cnt = min(self._cnt + 1, self._win + 2)
+            self._std = math.sqrt(max(self._var, 0.0) / (self._cnt - 1))
         return self._std
 
     def get_cnt(self):
