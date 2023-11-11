@@ -35,6 +35,16 @@ except ImportError:
     logging.warn('Try pip install pyuserinput and also have pyHook installed on your computer from below website:\n'
                  'http://www.lfd.uci.edu/~gohlke/pythonlibs')
 
+try:
+    import pyautogui
+except ImportError:
+    logging.warn('Try pip install pyautogui')
+
+try:
+    import pyttsx3
+except ImportError:
+    logging.warn('Try pip install pyttsx3')
+
 
 class GlobalHotKeys:
     """
