@@ -16,3 +16,4 @@ botocore
 setuptools
 
 qmt
+vqf
