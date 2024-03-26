@@ -6,6 +6,7 @@ import sys
 import random
 import threading
 import time
+import yaml
 from typing import *
 
 import matplotlib.pyplot as plt
@@ -242,6 +243,13 @@ def compose_funcs(*funcs):
 
 
 def disable_print_wrap_and_suppress(deal_with_numpy=True, deal_with_pandas=True):
+    """
+    Disables the wrapping and suppresses the scientific notation of floating point numbers
+    in numpy arrays and pandas DataFrames when printed to the console.
+
+    :param deal_with_numpy: A boolean flag indicating whether to apply settings to numpy arrays.
+    :param deal_with_pandas: A boolean flag indicating whether to apply settings to pandas DataFrames.
+    """
     if deal_with_numpy:
         import numpy as np
         np.set_printoptions(threshold=np.inf, linewidth=np.inf, suppress=True)
@@ -325,3 +333,38 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
     logger.addHandler(batch_file_handler)
 
     return logger
+
+
+def write_yaml_config(config_yaml_file: str, config: dict):
+    """
+    Writes the given configuration dictionary to a YAML file.
+
+    :param config_yaml_file: The path to the YAML file where the config should be written.
+    :param config: A dictionary containing the configuration settings to write.
+    """
+    try:
+        with open(config_yaml_file, 'w', encoding='UTF-8') as f:
+            yaml.dump(config, f, default_flow_style=False)
+    except IOError as e:
+        print(f"Error writing to file {config_yaml_file}: {e}")
+    except yaml.YAMLError as e:
+        print(f"Error dumping config to YAML: {e}")
+
+
+def read_yaml_config(config_yaml_file: str):
+    """
+    Reads and returns the configuration from a YAML file.
+
+    :param config_yaml_file: The path to the YAML file from which to read the config.
+    :return: A dictionary containing the configuration settings.
+    """
+    try:
+        with open(config_yaml_file, 'r', encoding='UTF-8') as f:
+            data = yaml.safe_load(f)
+        return data
+    except IOError as e:
+        print(f"Error reading file {config_yaml_file}: {e}")
+        return None
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML file: {e}")
+        return None

@@ -10,6 +10,7 @@ h5py
 sortedcontainers
 
 pillow
+pyyaml
 requests
 boto3
 botocore
