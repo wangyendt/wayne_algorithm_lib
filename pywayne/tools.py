@@ -253,60 +253,21 @@ def disable_print_wrap_and_suppress(deal_with_numpy=True, deal_with_pandas=True)
         pd.set_option('display.width', None)
 
 
-class Logger:
-    """
-    A Logger class that sets up a logging system which writes logs to the console and to files.
-    Logs can be written at different levels and are colored for console output.
-    """
-
-    def __init__(self, logger_name: str, project_version: str, log_root: str,
+def wayne_logger(logger_name: str, project_version: str, log_root: str,
                  stream_level=logging.DEBUG,
                  single_file_level=logging.INFO,
                  batch_file_level=logging.DEBUG):
-        """
-        Initializes the logger with specified settings.
+    """
+    A Logger function that sets up a logging system which writes logs to the console and to files.
+    Logs can be written at different levels and are colored for console output.
 
-        :param logger_name: Name of the logger.
-        :param project_version: Version of the project for logging.
-        :param log_root: Root directory for log files.
-        :param stream_level: Logging level for console output.
-        :param single_file_level: Logging level for the single main log file.
-        :param batch_file_level: Logging level for batch log files.
-        """
-        logger = logging.getLogger(logger_name)
-        logger.propagate = 0  # Prevents log messages from propagating to the logger's parent.
-        logger.setLevel(logging.DEBUG)
-
-        # ColoredFormatter for console readability.
-        formatter = self.ColoredFormatter(
-            f'%(asctime)s-%(module)s-line[%(lineno)d]-v{project_version}-%(levelname)s-%(message)s'
-        )
-
-        # Setting up StreamHandler for console output.
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setLevel(stream_level)
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
-
-        # Setting up FileHandler for a single main log file.
-        os.makedirs(log_root, exist_ok=True)
-        single_file_handler = logging.FileHandler(
-            os.path.join(log_root, 'main.log'), encoding='utf-8'
-        )
-        single_file_handler.setLevel(single_file_level)
-        single_file_handler.setFormatter(formatter)
-        logger.addHandler(single_file_handler)
-
-        # Setting up FileHandler for batch log files with unique naming.
-        batch_log_directory = os.path.join(log_root, 'batches')
-        os.makedirs(batch_log_directory, exist_ok=True)
-        batch_file_handler = logging.FileHandler(
-            os.path.join(batch_log_directory, f'{project_version}_{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")}.log'),
-            encoding='utf-8'
-        )
-        batch_file_handler.setLevel(batch_file_level)
-        batch_file_handler.setFormatter(formatter)
-        logger.addHandler(batch_file_handler)
+    :param logger_name: Name of the logger.
+    :param project_version: Version of the project for logging.
+    :param log_root: Root directory for log files.
+    :param stream_level: Logging level for console output.
+    :param single_file_level: Logging level for the single main log file.
+    :param batch_file_level: Logging level for batch log files.
+    """
 
     class ColoredFormatter(logging.Formatter):
         """
@@ -327,3 +288,40 @@ class Logger:
             if levelname in self.COLORS:
                 record.levelname = f"{self.COLORS[levelname]}{levelname}{self.COLORS['ENDC']}"
             return super().format(record)
+
+    logger = logging.getLogger(logger_name)
+    logger.propagate = 0  # Prevents log messages from propagating to the logger's parent.
+    logger.setLevel(logging.DEBUG)
+
+    # ColoredFormatter for console readability.
+    formatter = ColoredFormatter(
+        f'%(asctime)s-%(module)s-line[%(lineno)d]-v{project_version}-%(levelname)s-%(message)s'
+    )
+
+    # Setting up StreamHandler for console output.
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(stream_level)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    # Setting up FileHandler for a single main log file.
+    os.makedirs(log_root, exist_ok=True)
+    single_file_handler = logging.FileHandler(
+        os.path.join(log_root, 'main.log'), encoding='utf-8'
+    )
+    single_file_handler.setLevel(single_file_level)
+    single_file_handler.setFormatter(formatter)
+    logger.addHandler(single_file_handler)
+
+    # Setting up FileHandler for batch log files with unique naming.
+    batch_log_directory = os.path.join(log_root, 'batches')
+    os.makedirs(batch_log_directory, exist_ok=True)
+    batch_file_handler = logging.FileHandler(
+        os.path.join(batch_log_directory, f'{project_version}_{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")}.log'),
+        encoding='utf-8'
+    )
+    batch_file_handler.setLevel(batch_file_level)
+    batch_file_handler.setFormatter(formatter)
+    logger.addHandler(batch_file_handler)
+
+    return logger
