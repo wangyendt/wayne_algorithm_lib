@@ -335,14 +335,20 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
     return logger
 
 
-def write_yaml_config(config_yaml_file: str, config: dict):
+def write_yaml_config(config_yaml_file: str, config: dict, update=False):
     """
     Writes the given configuration dictionary to a YAML file.
 
     :param config_yaml_file: The path to the YAML file where the config should be written.
     :param config: A dictionary containing the configuration settings to write.
+    :param update: If True, the function will update the existing YAML file with the new config. If False, the function will overwrite the existing YAML file with the new config.
     """
     try:
+        if update:
+            existing_config = read_yaml_config(config_yaml_file)
+            if existing_config:
+                existing_config.update(config)
+                config = existing_config
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
             yaml.dump(config, f, default_flow_style=False)
     except IOError as e:
