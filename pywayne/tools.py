@@ -80,7 +80,19 @@ def maximize_figure(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         ret = func(*args, **kwargs)
-        plt.get_current_fig_manager().window.showMaximized()
+        backend = plt.get_backend()
+        mgr = plt.get_current_fig_manager()
+
+        if backend.lower() == 'tkagg':
+            mgr.window.state('zoomed')  # TkAgg backend
+        elif backend.lower() == 'wxagg':
+            mgr.frame.Maximize(True)  # wxAgg backend
+        elif backend.lower() == 'qt4agg' or backend.lower() == 'qt5agg':
+            mgr.window.showMaximized()  # Qt4Agg and Qt5Agg backend
+        elif backend.lower() in ['gtk3agg', 'gtk3cairo']:
+            mgr.window.maximize()  # GTK3 backends
+        else:
+            print(f"Warning: '{backend}' backend does not support maximize_figure.")
         return ret
 
     return wrapper
