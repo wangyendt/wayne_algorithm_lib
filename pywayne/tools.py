@@ -347,6 +347,31 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
     return logger
 
 
+def wayne_print(text: object, color: str = "default", bold: bool = False):
+    """
+    Function to print text in color and/or bold.
+
+    Parameters:
+    - text: Text to be printed
+    - color: Text color, options include "default", "red", "green", "yellow", "blue", "magenta", "cyan", "white"
+    - bold: Boolean, if True, prints the text in bold
+    """
+    colors = {
+        "default": "\033[0m",  # Default color
+        "red": "\033[31m",  # Red
+        "green": "\033[32m",  # Green
+        "yellow": "\033[33m",  # Yellow
+        "blue": "\033[34m",  # Blue
+        "magenta": "\033[35m",  # Magenta
+        "cyan": "\033[36m",  # Cyan
+        "white": "\033[37m"  # White
+    }
+    bold_code = "\033[1m" if bold else ""
+    color_code = colors.get(color, colors["default"])
+    end_code = colors["default"]  # Reset color and style to avoid affecting subsequent prints
+    print(f"{color_code}{bold_code}{text}{end_code}")
+
+
 def write_yaml_config(config_yaml_file: str, config: dict, update=False):
     """
     Writes the given configuration dictionary to a YAML file.

@@ -1,13 +1,15 @@
 configparser
 easygui
-numpy
+h5py
 matplotlib
-seaborn
+numpy
 pandas
+pprint
 pyperclip
 scipy
-h5py
+seaborn
 sortedcontainers
+tqdm
 
 pillow
 pyyaml
