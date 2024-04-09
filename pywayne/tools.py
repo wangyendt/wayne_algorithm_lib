@@ -295,12 +295,12 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
         """
         # ANSI escape sequences for colors.
         COLORS = {
-            'DEBUG': '\033[36m',  # Cyan
-            'INFO': '\033[32m',  # Bright green
-            'WARNING': '\033[33m',  # Bright yellow
-            'ERROR': '\033[31m',  # Bright red
-            'CRITICAL': '\033[35m',  # Purple
-            'ENDC': '\033[0m',  # Reset to default color
+            'DEBUG': '\033[36m\033[1m',     # Cyan
+            'INFO': '\033[32m\033[1m',      # Bright green
+            'WARNING': '\033[33m\033[1m',   # Bright yellow
+            'ERROR': '\033[31m\033[1m',     # Bright red
+            'CRITICAL': '\033[35m\033[1m',  # Purple
+            'ENDC': '\033[0m',              # Reset to default color
         }
 
         def format(self, record):
