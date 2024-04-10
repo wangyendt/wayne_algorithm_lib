@@ -126,7 +126,7 @@ def binding_press_release(func_dict: dict):
     用来绑定figure和键鼠处理函数
     :param func_dict: 映射字典
     :return: 
-    
+
     example:
     func_dict = {
         'button_press_event': on_button_press,
@@ -380,12 +380,32 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False):
     :param config: A dictionary containing the configuration settings to write.
     :param update: If True, the function will update the existing YAML file with the new config. If False, the function will overwrite the existing YAML file with the new config.
     """
+
+    def deep_merge_dicts(original, updater):
+        """
+        Deeply merges two dictionaries. The `updater` dictionary values will
+        overwrite those from the `original` in case of conflicts. This function
+        is recursive to support nested dictionaries.
+
+        :param original: The original dictionary to be updated.
+        :param updater: The dictionary with updates.
+        :return: The merged dictionary.
+        """
+        for key, value in updater.items():
+            if isinstance(value, dict) and key in original:
+                original_value = original.get(key, {})
+                if isinstance(original_value, dict):
+                    deep_merge_dicts(original_value, value)
+                else:
+                    original[key] = value
+            else:
+                original[key] = value
+        return original
+
     try:
         if update:
             existing_config = read_yaml_config(config_yaml_file)
-            if existing_config:
-                existing_config.update(config)
-                config = existing_config
+            config = deep_merge_dicts(existing_config, config)
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
             yaml.dump(config, f, default_flow_style=False)
     except IOError as e:
@@ -407,7 +427,7 @@ def read_yaml_config(config_yaml_file: str):
         return data
     except IOError as e:
         print(f"Error reading file {config_yaml_file}: {e}")
-        return None
+        return {}
     except yaml.YAMLError as e:
         print(f"Error parsing YAML file: {e}")
-        return None
+        return {}
