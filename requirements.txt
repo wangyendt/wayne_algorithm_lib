@@ -1,5 +1,6 @@
 configparser
 easygui
+filelock
 h5py
 matplotlib
 numpy

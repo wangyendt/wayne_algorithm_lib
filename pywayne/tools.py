@@ -8,6 +8,7 @@ import threading
 import time
 import yaml
 from typing import *
+from filelock import FileLock
 
 import matplotlib.pyplot as plt
 
@@ -411,15 +412,10 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False):
         existing_config = {}
 
     with lock:
-        try:
-            if update:
-                config = deep_merge_dicts(existing_config, config)
-            with open(config_yaml_file, 'w', encoding='UTF-8') as f:
-                yaml.dump(config, f, default_flow_style=False)
-        except IOError as e:
-            print(f"Error writing to file {config_yaml_file}: {e}")
-        except yaml.YAMLError as e:
-            print(f"Error dumping config to YAML: {e}")
+        if update:
+            config = deep_merge_dicts(existing_config, config)
+        with open(config_yaml_file, 'w', encoding='UTF-8') as f:
+            yaml.dump(config, f, default_flow_style=False)
 
 
 def read_yaml_config(config_yaml_file: str):
@@ -434,13 +430,6 @@ def read_yaml_config(config_yaml_file: str):
     lock = FileLock(lock_file)
 
     with lock:
-        try:
-            with open(config_yaml_file, 'r', encoding='UTF-8') as f:
-                data = yaml.safe_load(f)
-            return data
-        except IOError as e:
-            print(f"Error reading file {config_yaml_file}: {e}")
-            return {}
-        except yaml.YAMLError as e:
-            print(f"Error parsing YAML file: {e}")
-            return {}
+        with open(config_yaml_file, 'r', encoding='UTF-8') as f:
+            data = yaml.safe_load(f)
+        return data if data is not None else {}
