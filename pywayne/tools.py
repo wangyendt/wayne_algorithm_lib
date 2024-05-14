@@ -1,7 +1,9 @@
 import datetime
 import functools
+import inspect
 import logging
 import os
+import pprint
 import sys
 import random
 import threading
@@ -147,6 +149,83 @@ def binding_press_release(func_dict: dict):
         return wrapper
 
     return binding_press_release_decorator
+
+
+def trace_calls(_func=None, *, print_type='default'):
+    """
+    A decorator to trace calls to a function, printing detailed call information.
+
+    Parameters:
+        _func (callable, optional): The function to be decorated. If None, this decorator
+                                    is returned with the print_type set.
+        print_type (str, optional): The type of printing method to use for logging call
+                                    information. 'default' for wayne_print with 'green' color,
+                                    and 'pprint' for pretty-printed logs.
+
+    Returns:
+        callable: A decorated function with enhanced logging.
+
+    Usage:
+        @trace_calls            # Uses wayne_print with default settings.
+        def some_function():
+            pass
+
+        @trace_calls(print_type='pprint')  # Uses pprint for logging.
+        def another_function():
+            pass
+    """
+
+    def decorator(func):
+        if not hasattr(decorator, "call_counts"):
+            decorator.call_counts = {}
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()  # Start time of the function call.
+            if func.__name__ not in decorator.call_counts:
+                decorator.call_counts[func.__name__] = 0
+
+            # Collect caller information from the stack.
+            caller = inspect.stack()[1]
+            caller_frame = caller[0]
+            caller_function = caller_frame.f_code.co_name
+            caller_filename = caller_frame.f_code.co_filename
+            caller_lineno = caller_frame.f_lineno
+
+            # Increment the count of calls.
+            decorator.call_counts[func.__name__] += 1
+
+            result = func(*args, **kwargs)
+            end_time = time.time()  # End time of the function call.
+
+            # Log dictionary creation.
+            log_dict = {
+                "Caller": caller_function,
+                "Callee": func.__name__,
+                "Time": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "Execution Time": f"{end_time - start_time:.6f}s",
+                "Calls": decorator.call_counts[func.__name__],
+                "Arguments": args,
+                "Keyword Arguments": kwargs,
+                "Return Value": result,
+                "File": caller_filename,
+                "Line": caller_lineno
+            }
+
+            # Print the log based on the specified print type.
+            if print_type == 'pprint':
+                pprint.pp(log_dict)
+            else:
+                wayne_print(log_dict, 'green')
+
+            return result
+
+        return wrapper
+
+    if _func is None:
+        return decorator
+    else:
+        return decorator(_func)
 
 
 def list_all_files(
