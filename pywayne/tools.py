@@ -375,12 +375,12 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
         """
         # ANSI escape sequences for colors.
         COLORS = {
-            'DEBUG': '\033[36m\033[1m',     # Cyan
-            'INFO': '\033[32m\033[1m',      # Bright green
-            'WARNING': '\033[33m\033[1m',   # Bright yellow
-            'ERROR': '\033[31m\033[1m',     # Bright red
+            'DEBUG': '\033[36m\033[1m',  # Cyan
+            'INFO': '\033[32m\033[1m',  # Bright green
+            'WARNING': '\033[33m\033[1m',  # Bright yellow
+            'ERROR': '\033[31m\033[1m',  # Bright red
             'CRITICAL': '\033[35m\033[1m',  # Purple
-            'ENDC': '\033[0m',              # Reset to default color
+            'ENDC': '\033[0m',  # Reset to default color
         }
 
         def format(self, record):
@@ -485,12 +485,11 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False):
     lock_file = config_yaml_file + ".lock"
     lock = FileLock(lock_file)
 
-    if update and os.path.exists(config_yaml_file):
-        existing_config = read_yaml_config(config_yaml_file)
-    else:
-        existing_config = {}
-
     with lock:
+        if update and os.path.exists(config_yaml_file):
+            existing_config = read_yaml_config(config_yaml_file)
+        else:
+            existing_config = {}
         if update:
             config = deep_merge_dicts(existing_config, config)
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
