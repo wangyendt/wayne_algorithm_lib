@@ -487,10 +487,8 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False):
 
     with lock:
         if update and os.path.exists(config_yaml_file):
-            existing_config = read_yaml_config(config_yaml_file)
-        else:
-            existing_config = {}
-        if update:
+            with open(config_yaml_file, 'r', encoding='UTF-8') as f:
+                existing_config = yaml.safe_load(f) or {}
             config = deep_merge_dicts(existing_config, config)
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
             yaml.dump(config, f, default_flow_style=False)
@@ -509,5 +507,4 @@ def read_yaml_config(config_yaml_file: str):
 
     with lock:
         with open(config_yaml_file, 'r', encoding='UTF-8') as f:
-            data = yaml.safe_load(f)
-        return data if data is not None else {}
+            return yaml.safe_load(f) or {}
