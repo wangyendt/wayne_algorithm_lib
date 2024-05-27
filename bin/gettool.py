@@ -14,6 +14,23 @@ import shutil
 import subprocess
 import os
 import yaml
+from pywayne.tools import wayne_print
+
+
+def sparse_clone(url: str, target_dir: str):
+    result = subprocess.run(f'git clone --sparse {url} {target_dir}', shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        result = subprocess.run(f'git clone --no-checkout {url} {target_dir}', shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            cwd = os.getcwd()
+            os.chdir(target_dir)
+            subprocess.run('git sparse-checkout init --cone', shell=True, capture_output=True, text=True)
+            os.chdir(cwd)
+            wayne_print(f'Cloned repository from {url} to {target_dir} with sparse-checkout initialized.', 'yellow')
+        else:
+            wayne_print(f'Failed to clone repository from {url} to {target_dir}.', 'red')
+    else:
+        wayne_print(f'Successfully cloned repository from {url} to {target_dir} with --sparse option.', 'green')
 
 
 def fetch_tool(tool_name, target_dir='', build=False, clean=False):
@@ -21,7 +38,7 @@ def fetch_tool(tool_name, target_dir='', build=False, clean=False):
     cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as temp_dir:
         os.chdir(temp_dir)
-        subprocess.run(["git", "clone", "--sparse", "https://github.com/wangyendt/cpp_tools", temp_dir])
+        sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.')
         with open(name_to_path_map_yaml_file, 'r') as f:
@@ -56,11 +73,7 @@ def fetch_tool(tool_name, target_dir='', build=False, clean=False):
 def print_supported_tools():
     with tempfile.TemporaryDirectory() as temp_dir:
         os.chdir(temp_dir)
-        subprocess.run(
-            ["git", "clone", "--sparse", "https://github.com/wangyendt/cpp_tools", temp_dir],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.')
         with open(name_to_path_map_yaml_file, 'r') as f:
