@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import os
 import yaml
-from pywayne.tools import wayne_print
+from pywayne.tools import wayne_print, read_yaml_config
 
 
 def sparse_clone(url: str, target_dir: str):
@@ -40,10 +40,9 @@ def fetch_tool(tool_name, target_dir='', build=False, clean=False):
         os.chdir(temp_dir)
         sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
-        assert name_to_path_map_yaml_file in os.listdir('.')
-        with open(name_to_path_map_yaml_file, 'r') as f:
-            name_to_path_map = yaml.safe_load(f)
-        tool_path = name_to_path_map[tool_name]
+        assert name_to_path_map_yaml_file in os.listdir('.'), f'Failed to find {name_to_path_map_yaml_file} in {temp_dir}'
+        name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
+        tool_path = name_to_path_map[tool_name]['name']
         if not target_dir:
             target_dir = os.path.join(cwd, tool_path)
         if not build and os.path.exists(target_dir):
@@ -55,10 +54,15 @@ def fetch_tool(tool_name, target_dir='', build=False, clean=False):
         else:
             subprocess.run(["git", "sparse-checkout", "set", tool_path])
         if build:
-            os.system(f'cd {tool_path} && mkdir -p build && cd build && cmake .. && make -j12')
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            shutil.copytree(f'{tool_path}/lib/', target_dir)
+            if not name_to_path_map[tool_name]['buildable']:
+                wayne_print(f'{tool_name} is not buildable, skip building', 'red')
+            elif not os.path.exists(f'{tool_path}/CMakeLists.txt'):
+                wayne_print(f'{tool_name} does not have a CMakeLists.txt, skip building', 'red')
+            else:
+                os.system(f'cd {tool_path} && mkdir -p build && cd build && cmake .. && make -j12')
+                if os.path.exists(target_dir):
+                    shutil.rmtree(target_dir)
+                shutil.copytree(f'{tool_path}/lib/', target_dir)
         else:
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir)
@@ -75,11 +79,10 @@ def print_supported_tools():
         os.chdir(temp_dir)
         sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
-        assert name_to_path_map_yaml_file in os.listdir('.')
-        with open(name_to_path_map_yaml_file, 'r') as f:
-            name_to_path_map = yaml.safe_load(f)
-            print('Currently supported tools:')
-            print(', '.join(name_to_path_map.keys()))
+        assert name_to_path_map_yaml_file in os.listdir('.'), f"{name_to_path_map_yaml_file} not found in {temp_dir}"
+        name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
+        print('Currently supported tools:')
+        print(', '.join(name_to_path_map.keys()))
 
 
 def main():
@@ -113,9 +116,9 @@ def main():
     fetch_tool(tool_name, target_dir=target_path, build=build, clean=clean)
 
     if args.upgrade:
-        print("(not implemented yet)")
+        wayne_print("(not implemented yet)", "yellow")
     if args.force:
-        print("(not implemented yet)")
+        wayne_print("(not implemented yet)", "yellow")
 
 
 if __name__ == '__main__':
