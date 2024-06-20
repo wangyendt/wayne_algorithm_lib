@@ -47,8 +47,11 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False):
             target_dir = os.path.join(cwd, tool_path)
         if not build and os.path.exists(target_dir):
             if input(f'{target_dir} already exists, still want to fetch? (Y/N)').lower() != 'y': return
-        with open('.gitmodules', 'r') as f:
-            tool_is_submodule = any(f'path = {tool_path}' in line for line in f)
+        if os.path.exists('.gitmodules'):
+            with open('.gitmodules', 'r') as f:
+                tool_is_submodule = any(f'path = {tool_path}' in line for line in f)
+        else:
+            tool_is_submodule = False
         if tool_is_submodule:
             subprocess.run(["git", "submodule", "update", "--init", "--recursive", tool_path])
         else:
