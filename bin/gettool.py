@@ -42,7 +42,7 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False):
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.'), f'Failed to find {name_to_path_map_yaml_file} in {temp_dir}'
         name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
-        tool_path = name_to_path_map[tool_name]['name']
+        tool_path = name_to_path_map[tool_name]['path']
         if not target_dir:
             target_dir = os.path.join(cwd, tool_path)
         if not build and os.path.exists(target_dir):
