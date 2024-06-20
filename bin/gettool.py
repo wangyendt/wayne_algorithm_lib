@@ -96,20 +96,30 @@ def main():
     parser.add_argument('-f', '--force', action='store_true', help='Force action')
     parser.add_argument('-c', '--clean', action='store_true', help='Only fetch c++ sources')
     parser.add_argument('-l', '--list', action='store_true', help='List current supported tools')
-    parser.add_argument('--set-url', type=str, default='', help='URL of the tool, e.g. "https://github.com/wangyendt/cpp_tools"')
+    parser.add_argument('--get-url', action='store_true', help='get current URL of the tool')
+    parser.add_argument('--set-url', type=str, default='', help='set current URL of the tool, e.g. "https://github.com/wangyendt/cpp_tools"')
     parser.add_argument('--reset-url', action='store_true', help='reset url to default: "https://github.com/wangyendt/cpp_tools"')
 
     args = parser.parse_args()
 
-    if args.reset_url:
-        url = "https://github.com/wangyendt/cpp_tools"
-        write_yaml_config('config.yaml', {'url': url})
-        return
-    elif args.set_url:
+    exe_dir = os.path.dirname(__file__)
+    config_yaml_file = f'{exe_dir}/config.yaml'
+
+    url = "https://github.com/wangyendt/cpp_tools"
+    if args.set_url:
         url = args.set_url
-        write_yaml_config('config.yaml', {'url': url})
+    if args.reset_url or args.set_url:
+        write_yaml_config(config_yaml_file, {'url': url}, use_lock=False)
         return
-    url = read_yaml_config('config.yaml')['url']
+    config = read_yaml_config(config_yaml_file, use_lock=False)
+    if config:
+        url = config['url']
+    else:
+        wayne_print(f'read_yaml_config failed: {config_yaml_file}', 'yellow')
+
+    if args.get_url:
+        wayne_print(f'current url is: {url}', 'green')
+        return
 
     if args.list:
         print_supported_tools(url)

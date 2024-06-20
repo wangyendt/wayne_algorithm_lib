@@ -517,6 +517,6 @@ def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
         lock = FileLock(lock_file)
 
         with lock:
-            read_config()
+            return read_config()
     else:
-        read_config()
+        return read_config()
