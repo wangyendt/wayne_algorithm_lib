@@ -452,13 +452,14 @@ def wayne_print(text: object, color: str = "default", bold: bool = False):
     print(f"{color_code}{bold_code}{text}{end_code}")
 
 
-def write_yaml_config(config_yaml_file: str, config: dict, update=False):
+def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = True):
     """
     Writes the given configuration dictionary to a YAML file with file lock protection.
 
     :param config_yaml_file: The path to the YAML file where the config should be written.
     :param config: A dictionary containing the configuration settings to write.
     :param update: If True, the function will update the existing YAML file with the new config. If False, the function will overwrite the existing YAML file with the new config.
+    :param use_lock: Whether to use file lock protection. Default is True.
     """
 
     def deep_merge_dicts(original, updater):
@@ -482,29 +483,40 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False):
                 original[key] = value
         return original
 
-    lock_file = config_yaml_file + ".lock"
-    lock = FileLock(lock_file)
-
-    with lock:
+    def write_config():
         if update and os.path.exists(config_yaml_file):
             with open(config_yaml_file, 'r', encoding='UTF-8') as f:
                 existing_config = yaml.safe_load(f) or {}
-            config = deep_merge_dicts(existing_config, config)
+            config.update(deep_merge_dicts(existing_config, config))
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
             yaml.dump(config, f, default_flow_style=False)
 
+    if use_lock:
+        lock_file = config_yaml_file + ".lock"
+        with FileLock(lock_file):
+            write_config()
+    else:
+        write_config()
 
-def read_yaml_config(config_yaml_file: str):
+
+def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
     """
     Reads and returns the configuration from a YAML file with file lock protection.
 
     :param config_yaml_file: The path to the YAML file from which to read the config.
+    :param use_lock: Whether to use file lock protection. Default is True.
     :return: A dictionary containing the configuration settings.
     """
 
-    lock_file = config_yaml_file + ".lock"
-    lock = FileLock(lock_file)
-
-    with lock:
+    def read_config():
         with open(config_yaml_file, 'r', encoding='UTF-8') as f:
             return yaml.safe_load(f) or {}
+
+    if use_lock:
+        lock_file = config_yaml_file + ".lock"
+        lock = FileLock(lock_file)
+
+        with lock:
+            read_config()
+    else:
+        read_config()

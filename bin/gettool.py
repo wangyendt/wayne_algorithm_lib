@@ -13,8 +13,7 @@ import tempfile
 import shutil
 import subprocess
 import os
-import yaml
-from pywayne.tools import wayne_print, read_yaml_config
+from pywayne.tools import wayne_print, read_yaml_config, write_yaml_config
 
 
 def sparse_clone(url: str, target_dir: str):
@@ -29,16 +28,17 @@ def sparse_clone(url: str, target_dir: str):
             wayne_print(f'Cloned repository from {url} to {target_dir} with sparse-checkout initialized.', 'yellow')
         else:
             wayne_print(f'Failed to clone repository from {url} to {target_dir}.', 'red')
+            exit(0)
     else:
         wayne_print(f'Successfully cloned repository from {url} to {target_dir} with --sparse option.', 'green')
 
 
-def fetch_tool(tool_name, target_dir='', build=False, clean=False):
+def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False):
     print(f"Fetching tool: {tool_name}")
     cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as temp_dir:
         os.chdir(temp_dir)
-        sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
+        sparse_clone(url, temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.'), f'Failed to find {name_to_path_map_yaml_file} in {temp_dir}'
         name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
@@ -74,10 +74,10 @@ def fetch_tool(tool_name, target_dir='', build=False, clean=False):
     os.chdir(cwd)
 
 
-def print_supported_tools():
+def print_supported_tools(url: str):
     with tempfile.TemporaryDirectory() as temp_dir:
         os.chdir(temp_dir)
-        sparse_clone("https://github.com/wangyendt/cpp_tools", temp_dir)
+        sparse_clone(url, temp_dir)
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
         assert name_to_path_map_yaml_file in os.listdir('.'), f"{name_to_path_map_yaml_file} not found in {temp_dir}"
         name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
@@ -96,11 +96,23 @@ def main():
     parser.add_argument('-f', '--force', action='store_true', help='Force action')
     parser.add_argument('-c', '--clean', action='store_true', help='Only fetch c++ sources')
     parser.add_argument('-l', '--list', action='store_true', help='List current supported tools')
+    parser.add_argument('--set-url', type=str, default='', help='URL of the tool, e.g. "https://github.com/wangyendt/cpp_tools"')
+    parser.add_argument('--reset-url', action='store_true', help='reset url to default: "https://github.com/wangyendt/cpp_tools"')
 
     args = parser.parse_args()
 
+    if args.reset_url:
+        url = "https://github.com/wangyendt/cpp_tools"
+        write_yaml_config('config.yaml', {'url': url})
+        return
+    elif args.set_url:
+        url = args.set_url
+        write_yaml_config('config.yaml', {'url': url})
+        return
+    url = read_yaml_config('config.yaml')['url']
+
     if args.list:
-        print_supported_tools()
+        print_supported_tools(url)
         return
 
     # 如果通过 -n 或 --name 提供了名称，则使用它，否则使用位置参数提供的名称
@@ -113,7 +125,7 @@ def main():
     if tool_name is None:
         parser.error("the following arguments are required: name")
 
-    fetch_tool(tool_name, target_dir=target_path, build=build, clean=clean)
+    fetch_tool(url, tool_name, target_dir=target_path, build=build, clean=clean)
 
     if args.upgrade:
         wayne_print("(not implemented yet)", "yellow")
