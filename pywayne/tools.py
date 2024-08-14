@@ -557,4 +557,6 @@ def say(text, lang='zh'):
         raise NotImplementedError("pywayne.tools > say(text) only supports macOS and Linux.")
 
     # 在新线程中执行命令
-    threading.Thread(target=os.system, args=(command,)).start()
+    thd = threading.Thread(target=os.system, args=(command,))
+    thd.setDaemon(True)
+    thd.start()
