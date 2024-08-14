@@ -524,7 +524,7 @@ def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
         return read_config()
 
 
-def say(text, lang='en'):
+def say(text, lang='zh'):
     """
     Converts the given text to speech using the system's text-to-speech engine.
     On macOS, it uses the built-in `say` command. On Linux, it uses `espeak-ng`,
