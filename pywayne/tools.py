@@ -3,16 +3,18 @@ import functools
 import inspect
 import logging
 import os
+import platform
 import pprint
-import sys
 import random
+import subprocess
+import sys
 import threading
 import time
-import yaml
 from typing import *
-from filelock import FileLock
 
 import matplotlib.pyplot as plt
+import yaml
+from filelock import FileLock
 
 try:
     from PIL import Image
@@ -55,8 +57,8 @@ def func_timer(func):
 def func_timer_batch(func):
     """
     用于计算函数被调用次数和总耗时
-    :param func: 
-    :return: 
+    :param func:
+    :return:
     """
 
     @functools.wraps(func)
@@ -105,9 +107,9 @@ def singleton(cls):
     """
     单例模式装饰器
     :param cls: 需要被单例化的类
-    :param args: 
-    :param kw: 
-    :return: 
+    :param args:
+    :param kw:
+    :return:
     """
 
     instance = {}
@@ -128,7 +130,7 @@ def binding_press_release(func_dict: dict):
     """
     用来绑定figure和键鼠处理函数
     :param func_dict: 映射字典
-    :return: 
+    :return:
 
     example:
     func_dict = {
@@ -520,3 +522,38 @@ def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
             return read_config()
     else:
         return read_config()
+
+
+def say(text):
+    """
+    Converts the given text to speech using the system's text-to-speech engine.
+    On macOS, it uses the built-in `say` command. On Linux, it uses `espeak`, and
+    will automatically install `espeak` if it is not already installed.
+
+    :param text: The text string that you want to convert to speech.
+    :raises NotImplementedError: If the function is called on an unsupported operating system.
+    :raises subprocess.CalledProcessError: If the installation of `espeak` fails on Linux.
+    """
+    system_name = platform.system()
+
+    if system_name == "Darwin":  # macOS
+        command = f'say "{text}"'
+    elif system_name == "Linux":
+        # 检查是否安装了 espeak
+        try:
+            subprocess.check_output(['which', 'espeak'])
+        except subprocess.CalledProcessError:
+            print("espeak not found, installing...")
+            try:
+                # 尝试安装 espeak
+                subprocess.check_call(['sudo', 'apt-get', 'install', '-y', 'espeak'])
+            except subprocess.CalledProcessError as e:
+                print("Failed to install espeak. Please install it manually.")
+                raise e
+
+        command = f'espeak "{text}"'
+    else:
+        raise NotImplementedError("pywayne.tools > say(text) only supports macOS and Linux.")
+
+    # 在新线程中执行命令
+    threading.Thread(target=os.system, args=(command,)).start()
