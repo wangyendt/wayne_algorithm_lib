@@ -524,34 +524,35 @@ def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
         return read_config()
 
 
-def say(text):
+def say(text, lang='en'):
     """
     Converts the given text to speech using the system's text-to-speech engine.
-    On macOS, it uses the built-in `say` command. On Linux, it uses `espeak`, and
-    will automatically install `espeak` if it is not already installed.
+    On macOS, it uses the built-in `say` command. On Linux, it uses `espeak-ng`,
+    and will automatically install `espeak-ng` if it is not already installed.
 
     :param text: The text string that you want to convert to speech.
+    :param lang: The language code for the TTS engine (default is 'en' for English).
     :raises NotImplementedError: If the function is called on an unsupported operating system.
-    :raises subprocess.CalledProcessError: If the installation of `espeak` fails on Linux.
+    :raises subprocess.CalledProcessError: If the installation of `espeak-ng` fails on Linux.
     """
     system_name = platform.system()
 
     if system_name == "Darwin":  # macOS
         command = f'say "{text}"'
     elif system_name == "Linux":
-        # 检查是否安装了 espeak
+        # 检查是否安装了 espeak-ng
         try:
-            subprocess.check_output(['which', 'espeak'])
+            subprocess.check_output(['which', 'espeak-ng'])
         except subprocess.CalledProcessError:
-            print("espeak not found, installing...")
+            print("espeak-ng not found, installing...")
             try:
-                # 尝试安装 espeak
-                subprocess.check_call(['sudo', 'apt-get', 'install', '-y', 'espeak'])
+                # 尝试安装 espeak-ng
+                subprocess.check_call(['sudo', 'apt-get', 'install', '-y', 'espeak-ng'])
             except subprocess.CalledProcessError as e:
-                print("Failed to install espeak. Please install it manually.")
+                print("Failed to install espeak-ng. Please install it manually.")
                 raise e
 
-        command = f'espeak "{text}"'
+        command = f'espeak-ng -v {lang} "{text}"'
     else:
         raise NotImplementedError("pywayne.tools > say(text) only supports macOS and Linux.")
 
