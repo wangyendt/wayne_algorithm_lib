@@ -62,7 +62,8 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False):
             elif not os.path.exists(f'{tool_path}/CMakeLists.txt'):
                 wayne_print(f'{tool_name} does not have a CMakeLists.txt, skip building', 'red')
             else:
-                os.system(f'cd {tool_path} && mkdir -p build && cd build && cmake .. && make -j12')
+                command = f'cd {tool_path} && mkdir -p build && cd build && cmake .. && make -j12'
+                os.system(command)
                 if os.path.exists(target_dir):
                     shutil.rmtree(target_dir)
                 shutil.copytree(f'{tool_path}/lib/', target_dir)
@@ -106,7 +107,7 @@ def main():
     args = parser.parse_args()
 
     exe_dir = os.path.dirname(__file__)
-    config_yaml_file = f'{exe_dir}/config.yaml'
+    config_yaml_file = os.path.normpath(f'{exe_dir}/config.yaml')
 
     url = "https://github.com/wangyendt/cpp_tools"
     if args.set_url:
@@ -114,6 +115,9 @@ def main():
     if args.reset_url or args.set_url:
         write_yaml_config(config_yaml_file, {'url': url}, use_lock=False)
         return
+    if not os.path.exists(config_yaml_file):
+        wayne_print(f'config file {config_yaml_file} not found, use default url: {url}', 'yellow')
+        write_yaml_config(config_yaml_file, {'url': url}, use_lock=False)
     config = read_yaml_config(config_yaml_file, use_lock=False)
     if config:
         url = config['url']

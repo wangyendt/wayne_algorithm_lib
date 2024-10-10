@@ -1,11 +1,15 @@
 # author: wangye(Wayne)
 # license: Apache Licence
-# file: __version__.py
-# time: 2023-08-09-14:03:33
+# file: __init__.py
+# time: 2024-10-10-15:34:02
 # contact: wang121ye@hotmail.com
 # site:  wangyendt@github.com
 # software: PyCharm
 # code is far away from bugs.
 
 
-__version__ = "1.0.0.8.6"
+from . import corner_detector
+
+__all_ = [
+    'corner_detector.py'
+]
