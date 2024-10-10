@@ -12,6 +12,7 @@ import os
 import sys
 import subprocess
 import importlib
+import cv2
 import numpy as np
 
 
@@ -91,10 +92,6 @@ class CornerDetector:
 
 
 if __name__ == '__main__':
-    import cv2
-    import numpy as np
-
     test_image = cv2.imread('test.png', cv2.IMREAD_COLOR)
-
     detector = CornerDetector()
     detections = detector.detect(test_image, show_result=True)
