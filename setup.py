@@ -22,7 +22,28 @@ def parse_requirements(filename):
     return [line for line in lineiter if line and not line.startswith("#") and not line.startswith("~")]
 
 
-install_reqs = parse_requirements('requirements.txt')
+# 解析所有依赖
+all_reqs = parse_requirements('requirements.txt')
+
+# 定义核心依赖
+core_reqs = [
+    "ipdb",
+    "natsort",
+    "sortedcontainers",
+    "tqdm",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scipy",
+    "configparser",
+    "setuptools",
+    "filelock",
+    "pyyaml",
+    "requests",
+]
+
+# 定义可选依赖
+optional_reqs = [req for req in all_reqs if req not in core_reqs]
 
 setuptools.setup(
     name="pywayne",
@@ -37,7 +58,6 @@ setuptools.setup(
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-
     ],
     dependency_links=[
         'https://pypi.tuna.tsinghua.edu.cn/simple/',
@@ -46,12 +66,19 @@ setuptools.setup(
         'https://pypi.python.org/simple',
         'https://pypi.mirrors.ustc.edu.cn/simple/',
     ],
-    install_requires=install_reqs,
+    install_requires=core_reqs,
+    extras_require={
+        'full': optional_reqs,
+        'gui': ["easygui", "pynput"],
+        'image': ["pillow"],
+        'aws': ["boto3", "botocore"],
+        'data': ["h5py", "seaborn", "pyperclip"],
+        'geo': ["concave_hull", "alphashape", "shapely"],
+    },
     packages=setuptools.find_packages(),
     python_requires='>=3',
     scripts=[
         'bin/gettool',  # shell script
         'bin/gettool.py'  # python script
     ]
-
 )

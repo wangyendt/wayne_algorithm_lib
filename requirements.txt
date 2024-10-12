@@ -2,9 +2,12 @@ configparser
 easygui
 filelock
 h5py
+ipdb
 matplotlib
+natsort
 numpy
 pandas
+pynput
 pyperclip
 scipy
 seaborn
@@ -17,3 +20,7 @@ requests
 boto3
 botocore
 setuptools
+
+concave_hull
+alphashape
+shapely

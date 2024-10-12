@@ -9,7 +9,9 @@
 
 
 from . import corner_detector
+from . import geometric_hull_calculator
 
 __all_ = [
-    'corner_detector.py'
+    'corner_detector.py',
+    'geometric_hull_calculator.py'
 ]
