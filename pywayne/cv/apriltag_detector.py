@@ -16,10 +16,10 @@ import cv2
 import numpy as np
 
 
-class CornerDetector:
+class ApriltagCornerDetector:
     def __init__(self):
-        corner_detection_py = self._check_and_import_lib()
-        self.apriltag_36h11_detector = corner_detection_py.TagDetector(corner_detection_py.tag_codes_36h11(), 2)
+        apriltag_detection = self._check_and_import_lib()
+        self.apriltag_36h11_detector = apriltag_detection.TagDetector(apriltag_detection.tag_codes_36h11(), 2)
 
     def _check_and_import_lib(self):
         lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
@@ -93,5 +93,5 @@ class CornerDetector:
 
 if __name__ == '__main__':
     test_image = cv2.imread('test.png', cv2.IMREAD_COLOR)
-    detector = CornerDetector()
+    detector = ApriltagCornerDetector()
     detections = detector.detect(test_image, show_result=True)
