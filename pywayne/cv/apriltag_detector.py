@@ -1,6 +1,6 @@
 # author: wangye(Wayne)
 # license: Apache Licence
-# file: corner_detector.py
+# file: apriltag_detector.py
 # time: 2024-10-10-15:33:42
 # contact: wang121ye@hotmail.com
 # site:  wangyendt@github.com
@@ -25,12 +25,12 @@ class CornerDetector:
         lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib')
         sys.path.append(str(lib_path))
         try:
-            return importlib.import_module("corner_detection_py")
+            return importlib.import_module("apriltag_detection")
         except ImportError:
             os.makedirs(lib_path, exist_ok=True)
-            subprocess.run(['gettool', 'corner_detection', '-b', '-t', str(lib_path)], check=True)
+            subprocess.run(['gettool', 'apriltag_detection', '-b', '-t', str(lib_path)], check=True)
             importlib.invalidate_caches()
-            return importlib.import_module("corner_detection_py")
+            return importlib.import_module("apriltag_detection")
 
     def detect(self, image: np.ndarray, show_result: bool = False):
         if image.shape[2] == 3:
