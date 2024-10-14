@@ -33,6 +33,8 @@ class ApriltagCornerDetector:
             return importlib.import_module("apriltag_detection")
 
     def detect(self, image: np.ndarray, show_result: bool = False):
+        if len(image.shape) == 2:
+            image = image[..., None]
         if image.shape[2] == 3:
             gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
