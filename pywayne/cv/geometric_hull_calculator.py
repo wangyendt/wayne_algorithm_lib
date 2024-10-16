@@ -173,7 +173,9 @@ class GeometricHullCalculator:
         """
         Visualize the geometric shapes using OpenCV.
         """
-        img = np.ones((600, 600, 3), dtype=np.uint8) * 255
+        max_x = int(np.max(self.points[:, 0])) + 50  # 宽度，增加一些边距
+        max_y = int(np.max(self.points[:, 1])) + 50
+        img = np.ones((max_y, max_x, 3), dtype=np.uint8) * 255
         self._draw_points_opencv(img, self.points)
         self._draw_polygon_opencv(img, self.box, color=(0, 0, 255))
         if self.use_filtered_pts:

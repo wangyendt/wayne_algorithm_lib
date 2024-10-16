@@ -8,7 +8,8 @@ __all__ = [
     'data_structure',
     'plot',
     'ahrs',
-    'calibration'
+    'calibration',
+    'lark_bot_api'
     # 'tt_api',
     # 'ocs_api',
 ]
