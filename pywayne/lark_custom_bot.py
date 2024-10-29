@@ -1,6 +1,6 @@
 # author: wangye(Wayne)
 # license: Apache Licence
-# file: lark_bot_api.py
+# file: lark_custom_bot.py
 # time: 2024-10-16-15:39:44
 # contact: wang121ye@hotmail.com
 # site:  wangyendt@github.com
@@ -20,7 +20,7 @@ from typing import List, Dict, Optional, Union
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 
-class LarkBotApi:
+class LarkCustomBot:
     """
     A class to interact with the Lark (Feishu) Bot API.
 
@@ -31,7 +31,7 @@ class LarkBotApi:
 
     def __init__(self, webhook: str, secret: str = '', bot_app_id: str = '', bot_secret: str = '') -> None:
         """
-        Initialize the LarkBotApi instance.
+        Initialize the LarkCustomBot instance.
 
         Args:
             webhook (str): The webhook URL for the Lark bot.
@@ -367,7 +367,7 @@ if __name__ == '__main__':
     app_id = ''
     app_secret = ''
     hook = 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx'
-    bot = LarkBotApi(hook, bot_app_id=app_id, bot_secret=app_secret)
+    bot = LarkCustomBot(hook, bot_app_id=app_id, bot_secret=app_secret)
     bot.send_text("hello world")
     # image_key = bot.upload_image('./test.png')
     # image_key = bot.upload_image_from_cv2(cv2.imread('./test.png'))

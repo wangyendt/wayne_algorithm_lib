@@ -9,7 +9,9 @@ __all__ = [
     'plot',
     'ahrs',
     'calibration',
-    'lark_bot_api'
+    'lark_custom_bot',
+    'lark_bot',
+    'tts',
     # 'tt_api',
     # 'ocs_api',
 ]

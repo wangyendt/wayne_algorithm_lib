@@ -74,6 +74,7 @@ setuptools.setup(
         'aws': ["boto3", "botocore"],
         'data': ["h5py", "seaborn", "pyperclip"],
         'geo': ["concave_hull", "alphashape", "shapely"],
+        'bot': ["lark-oapi", 'gtts']
     },
     packages=setuptools.find_packages(),
     python_requires='>=3',

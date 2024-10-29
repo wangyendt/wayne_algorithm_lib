@@ -8,4 +8,4 @@
 # code is far away from bugs.
 
 
-__version__ = "1.0.0.9.4"
+__version__ = "1.0.0.9.6"

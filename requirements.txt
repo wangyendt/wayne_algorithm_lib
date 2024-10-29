@@ -24,3 +24,6 @@ setuptools
 concave_hull
 alphashape
 shapely
+
+gtts
+lark_oapi
