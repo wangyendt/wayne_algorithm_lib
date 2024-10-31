@@ -432,7 +432,7 @@ class LarkBot:
             )
             return None
 
-        return json.loads(lark.JSON.marshal(response.data, indent=4))
+        return json.loads(lark.JSON.marshal(response.data, indent=4))["user_list"]
 
     def get_group_list(self) -> List[Dict]:
         """
