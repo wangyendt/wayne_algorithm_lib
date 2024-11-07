@@ -51,7 +51,7 @@ def peak_det(v, delta, x=None):
     mintab = []
 
     if x is None:
-        x = np.arange(len(v))
+        x = range(len(v))
 
     v = np.asarray(v)
 
@@ -80,18 +80,17 @@ def peak_det(v, delta, x=None):
 
         if lookformax:
             if this < mx - delta:
-                maxtab.append((mxpos, mx))
+                maxtab.append([mxpos, mx])
                 mn = this
                 mnpos = x[i]
                 lookformax = False
         else:
             if this > mn + delta:
-                mintab.append((mnpos, mn))
+                mintab.append([mnpos, mn])
                 mx = this
                 mxpos = x[i]
                 lookformax = True
-
-    return np.array(maxtab), np.array(mintab)
+    return maxtab, mintab
 
 
 def butter_bandpass_filter(x, order=2, lo=0.1, hi=10, fs=0, btype='lowpass', realtime=False):
