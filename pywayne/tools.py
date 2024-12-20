@@ -454,7 +454,7 @@ def wayne_print(text: object, color: str = "default", bold: bool = False):
     print(f"{color_code}{bold_code}{text}{end_code}")
 
 
-def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = True):
+def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = False):
     """
     Writes the given configuration dictionary to a YAML file with file lock protection.
 
@@ -501,7 +501,7 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_loc
         write_config()
 
 
-def read_yaml_config(config_yaml_file: str, use_lock: bool = True):
+def read_yaml_config(config_yaml_file: str, use_lock: bool = False):
     """
     Reads and returns the configuration from a YAML file with file lock protection.
 
