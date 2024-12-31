@@ -12,11 +12,12 @@
 
 import collections
 import math
-
-from sortedcontainers import SortedList
-
 import numpy as np
-from scipy.signal import butter, lfilter, filtfilt
+
+from pywayne.tools import wayne_print
+from sortedcontainers import SortedList
+from scipy.signal import butter, lfilter, filtfilt, detrend, medfilt
+from scipy.interpolate import interp1d
 
 
 def peak_det(v, delta, x=None):
@@ -488,3 +489,259 @@ class CurveSimilarity:
             return np.squeeze([
                 np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
             ])
+
+
+class SignalDetrend:
+    """信号去趋势处理类"""
+
+    def __init__(self, method='linear', **kwargs):
+        """
+        初始化去趋势处理器
+
+        Parameters:
+            method: str, 去趋势方法
+                - 'none': 不去除趋势
+                - 'mean': 去除均值
+                - 'linear': 去除线性趋势
+                - 'poly': 多项式去趋势
+                - 'loess': 局部加权回归平滑
+                - 'wavelet': 小波变换去趋势
+                - 'emd': EMD去趋势
+                - 'ceemdan': CEEMDAN去趋势
+                - 'median': 中值滤波去趋势
+            **kwargs: 额外参数
+                poly_order: int, 多项式阶数 (默认2)
+                loess_frac: float, LOESS窗口比例 (默认0.2)
+                wavelet: str, 小波类型 (默认'db4')
+                wavelet_level: int, 小波分解层数 (默认3)
+                median_kernel: int, 中值滤波核大小 (默认11)
+        """
+        self.method = method
+        self.poly_order = kwargs.get('poly_order', 2)
+        self.loess_frac = kwargs.get('loess_frac', 0.2)
+        self.wavelet = kwargs.get('wavelet', 'db4')
+        self.wavelet_level = kwargs.get('wavelet_level', 3)
+        self.median_kernel = kwargs.get('median_kernel', 11)
+
+    def __call__(self, x):
+        """对信号进行去趋势处理"""
+        if self.method == 'none':
+            return x
+
+        elif self.method == 'mean':
+            return x - np.mean(x)
+
+        elif self.method == 'linear':
+            return detrend(x)
+
+        elif self.method == 'poly':
+            return self._detrend_polynomial(x)
+
+        elif self.method == 'loess':
+            return self._detrend_loess(x)
+
+        elif self.method == 'wavelet':
+            return self._detrend_wavelet(x)
+
+        elif self.method == 'emd':
+            return self._detrend_emd(x)
+
+        elif self.method == 'ceemdan':
+            return self._detrend_ceemdan(x)
+
+        elif self.method == 'median':
+            return self._detrend_median(x)
+
+        else:
+            raise ValueError(f'不支持的去趋势方法: {self.method}')
+
+    def _detrend_polynomial(self, x):
+        """去除多项式趋势"""
+        n = len(x)
+        if n <= 1:
+            return x
+
+        x_idx = np.linspace(0, 1, n)
+        coeffs = np.polyfit(x_idx, x, self.poly_order)
+        trend = np.polyval(coeffs, x_idx)
+        return x - trend
+
+    def _detrend_loess(self, x):
+        """使用LOESS去除趋势"""
+        n = len(x)
+        if n <= 1:
+            return x
+
+        x_idx = np.linspace(0, 1, n)
+        window = int(self.loess_frac * n)
+        window = max(3, min(window, n))
+
+        step = max(1, n // window)
+        x_smooth = np.zeros(n)
+
+        for i in range(0, n, step):
+            left = max(0, i - window // 2)
+            right = min(n, i + window // 2)
+
+            distances = np.abs(x_idx[left:right] - x_idx[i])
+            weights = (1 - (distances / np.max(distances)) ** 3) ** 3
+
+            coeffs = np.polyfit(x_idx[left:right], x[left:right], 1, w=weights)
+            x_smooth[i] = np.polyval(coeffs, x_idx[i])
+
+        if step > 1:
+            idx_calculated = np.arange(0, n, step)
+            f = interp1d(idx_calculated, x_smooth[idx_calculated],
+                         kind='cubic', fill_value='extrapolate')
+            x_smooth = f(np.arange(n))
+
+        return x - x_smooth
+
+    def _detrend_wavelet(self, x):
+        """使用小波变换去除趋势"""
+        try:
+            import pywt
+        except ImportError:
+            wayne_print("使用小波去趋势需要安装 pywt 库，请运行: pip install PyWavelets", 'yellow')
+            return x
+
+        coeffs = pywt.wavedec(x, self.wavelet, level=self.wavelet_level)
+        coeffs[0][:] = 0
+        return pywt.waverec(coeffs, self.wavelet)
+
+    def _detrend_emd(self, x):
+        """使用EMD去除趋势"""
+        try:
+            from PyEMD import EMD
+        except ImportError:
+            wayne_print("使用EMD去趋势需要安装 PyEMD 库，请运行: pip install EMD-signal", 'yellow')
+            return x
+
+        emd = EMD()
+        imfs = emd(x)
+        return x - imfs[-1]
+
+    def _detrend_ceemdan(self, x):
+        """使用CEEMDAN去除趋势"""
+        try:
+            from PyEMD import CEEMDAN
+        except ImportError:
+            wayne_print("使用CEEMDAN去趋势需要安装 PyEMD 库，请运行: pip install EMD-signal", 'yellow')
+            return x
+
+        ceemdan = CEEMDAN()
+        imfs = ceemdan(x)
+        return x - imfs[-1]
+
+    def _detrend_median(self, x):
+        """使用中值滤波去除趋势"""
+        trend = medfilt(x, self.median_kernel)
+        return x - trend
+
+
+class ButterworthFilter:
+    """Butterworth滤波器实现"""
+
+    def __init__(self, order=2, lo=0.1, hi=10.0, fs=100.0, btype='lowpass'):
+        """
+        初始化Butterworth滤波器
+
+        Parameters:
+            order: int, 滤波器阶数，默认为2
+            lo: float, 下限频率
+            hi: float, 上限频率
+            fs: float, 采样频率
+            btype: str, 滤波器类型 ('lowpass', 'highpass', 'bandpass', 'bandstop')
+        """
+        if not isinstance(order, int) or order <= 0:
+            raise ValueError(f'阶数必须是正整数，当前值：{order}')
+        if order > 8:
+            wayne_print(f'高阶滤波器(order={order})可能导致数值不稳定，推荐使用2-8阶', 'yellow')
+
+        # 计算滤波器系数
+        nyq = fs / 2
+        if btype == 'lowpass':
+            wn = hi / nyq
+        elif btype == 'highpass':
+            wn = lo / nyq
+        elif btype in ['bandpass', 'bandstop']:
+            wn = [lo / nyq, hi / nyq]
+        else:
+            raise ValueError(f'不支持的滤波器类型: {btype}')
+
+        self.b, self.a = butter(N=order, Wn=wn, btype=btype)
+
+        # 验证滤波器稳定性
+        if not np.all(np.abs(np.roots(self.a)) < 1):
+            wayne_print("滤波器可能不稳定", 'yellow')
+
+    def __call__(self, x):
+        """
+        对输入信号进行滤波
+
+        Parameters:
+            x: np.ndarray, 输入信号
+
+        Returns:
+            np.ndarray, 滤波后的信号
+        """
+        # 计算边界扩展
+        edge, ext = self._validate_pad(x)
+
+        # 计算初始状态
+        zi = self._lfilter_zi()
+
+        # 正向滤波
+        x0 = ext[0]
+        y, _ = self._lfilter(ext, zi * x0)
+
+        # 反向滤波
+        y0 = y[-1]
+        y = y[::-1]
+        y, _ = self._lfilter(y, zi * y0)
+        y = y[::-1]
+
+        # 提取有效部分
+        return y[edge:len(y) - edge]
+
+    def _validate_pad(self, x):
+        """使用奇对称扩展处理信号边界"""
+        ntaps = max(len(self.a), len(self.b))
+        edge = ntaps * 3
+
+        ext = np.zeros(len(x) + 2 * edge)
+        ext[edge:edge + len(x)] = x
+
+        for i in range(edge):
+            ext[i] = 2 * x[0] - x[edge - i - 1]
+            ext[-(i + 1)] = 2 * x[-1] - x[-(edge - i)]
+
+        return edge, ext
+
+    def _lfilter_zi(self):
+        """计算滤波器初始状态"""
+        n = max(len(self.a), len(self.b)) - 1
+        zi = np.zeros(n)
+
+        sum_b = np.sum(self.b)
+        sum_a = np.sum(self.a)
+
+        if abs(sum_a) > 1e-6:
+            gain = sum_b / sum_a
+            zi.fill(gain)
+
+        return zi
+
+    def _lfilter(self, x, zi):
+        """实现Direct Form II型滤波器结构"""
+        n = len(x)
+        y = np.zeros(n)
+        z = zi.copy()
+
+        for i in range(n):
+            y[i] = self.b[0] * x[i] + z[0]
+            for j in range(1, len(self.a)):
+                z[j - 1] = (self.b[j] * x[i] - self.a[j] * y[i] +
+                            (z[j] if j < len(z) else 0.0))
+
+        return y, z
