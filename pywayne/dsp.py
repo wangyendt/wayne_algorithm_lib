@@ -509,6 +509,7 @@ class SignalDetrend:
                 - 'emd': EMD去趋势
                 - 'ceemdan': CEEMDAN去趋势
                 - 'median': 中值滤波去趋势
+                - 'custom': 自定义线性去趋势
             **kwargs: 额外参数
                 poly_order: int, 多项式阶数 (默认2)
                 loess_frac: float, LOESS窗口比例 (默认0.2)
@@ -551,6 +552,9 @@ class SignalDetrend:
 
         elif self.method == 'median':
             return self._detrend_median(x)
+
+        elif self.method == 'custom':
+            return self._detrend(x)
 
         else:
             raise ValueError(f'不支持的去趋势方法: {self.method}')
@@ -637,6 +641,22 @@ class SignalDetrend:
         """使用中值滤波去除趋势"""
         trend = medfilt(x, self.median_kernel)
         return x - trend
+
+    def _detrend(self, x):
+        """使用自定义方法去除线性趋势"""
+        n = len(x)
+        if n <= 1:
+            return x
+
+        x_idx = np.arange(n, dtype=float)
+        mean_x = np.mean(x_idx)
+        mean_y = np.mean(x)
+
+        dx = x_idx - mean_x
+        dy = x - mean_y
+
+        slope = np.sum(dx * dy) / np.sum(dx * dx) if np.sum(dx * dx) != 0 else 0
+        return x - (slope * x_idx + (mean_y - slope * mean_x))
 
 
 class ButterworthFilter:
