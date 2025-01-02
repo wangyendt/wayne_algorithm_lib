@@ -19,6 +19,7 @@ pyyaml
 requests
 boto3
 botocore
+oss2
 setuptools
 
 concave_hull
