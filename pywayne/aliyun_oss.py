@@ -8,16 +8,17 @@
 # code is far away from bugs.
 
 
+import os
 import oss2
 import cv2
 import numpy as np
 from natsort import natsorted
 from typing import List, Optional
 from pywayne.tools import wayne_print
-import os
+from pathlib import Path
 
 
-class OssTools:
+class OssManager:
     def __init__(
             self,
             endpoint: str,
@@ -304,7 +305,7 @@ class OssTools:
 
 
 if __name__ == '__main__':
-    manager = OssTools(
+    manager = OssManager(
         endpoint='http://oss-cn-shenzhen.aliyuncs.com',
         bucket_name='wayne-oss-bucket',
         api_key='xxx',
