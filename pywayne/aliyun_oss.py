@@ -303,44 +303,156 @@ class OssManager:
             self._print_warning(f"批量删除文件失败：{str(e)}")
             return False
 
+    def upload_directory(self, local_path: str, prefix: str = "") -> bool:
+        """
+        上传整个文件夹到 OSS
+
+        Args:
+            local_path: 本地文件夹路径
+            prefix: OSS 中的前缀路径，默认为空
+
+        Returns:
+            是否全部上传成功
+        """
+        if not self._check_write_permission():
+            return False
+
+        if not os.path.isdir(local_path):
+            self._print_warning(f"目录不存在：{local_path}")
+            return False
+
+        success = True
+        for root, _, files in os.walk(local_path):
+            for file in files:
+                # 获取文件的完整路径
+                file_path = os.path.join(root, file)
+                # 计算相对路径
+                rel_path = os.path.relpath(file_path, local_path)
+                # 构建 OSS key
+                key = os.path.join(prefix, rel_path).replace("\\", "/")
+                # 上传文件
+                if not self.upload_file(key, file_path):
+                    success = False
+
+        return success
+
+    def download_directory(self, prefix: str, local_path: str) -> bool:
+        """
+        从 OSS 下载整个文件夹
+
+        Args:
+            prefix: OSS 中的前缀路径
+            local_path: 下载到本地的目标路径
+
+        Returns:
+            是否全部下载成功
+        """
+        # 获取所有匹配的文件
+        keys = self.list_keys_with_prefix(prefix)
+        if not keys:
+            self._print_warning(f"未找到前缀为 '{prefix}' 的文件")
+            return False
+
+        # 创建本地目录
+        os.makedirs(local_path, exist_ok=True)
+
+        success = True
+        for key in keys:
+            if not self.download_file(key, local_path):
+                success = False
+
+        return success
+
 
 if __name__ == '__main__':
+    import shutil
+
+    # 初始化 OSS 管理器
     manager = OssManager(
-        endpoint='http://oss-cn-shenzhen.aliyuncs.com',
-        bucket_name='wayne-oss-bucket',
-        api_key='xxx',
-        api_secret='xxx',
-        verbose=True
+        endpoint="xxx",
+        bucket_name="xxx",
+        api_key="xxx",
+        api_secret="xxx"
     )
 
-    import time
+    # 创建测试文件
+    test_file_path = "test.txt"
+    test_content = "Hello, World!"
+    with open(test_file_path, "w", encoding="utf-8") as f:
+        f.write(test_content)
 
-    start = time.time()
+    # 创建测试文件夹
+    test_dir_path = "test_dir"
+    os.makedirs(test_dir_path, exist_ok=True)
+    with open(os.path.join(test_dir_path, "file1.txt"), "w", encoding="utf-8") as f:
+        f.write("File 1")
+    with open(os.path.join(test_dir_path, "file2.txt"), "w", encoding="utf-8") as f:
+        f.write("File 2")
+    os.makedirs(os.path.join(test_dir_path, "subdir"), exist_ok=True)
+    with open(os.path.join(test_dir_path, "subdir", "file3.txt"), "w", encoding="utf-8") as f:
+        f.write("File 3")
 
-    manager.download_file('test.txt')
-    manager.download_files_with_prefix('test_folder', 'local_test_folder')
+    try:
+        # 1. 上传文件
+        wayne_print("\n1. 测试上传文件", "cyan")
+        manager.upload_file("test.txt", test_file_path)
+        manager.upload_file("1/test.txt", test_file_path)
+        manager.upload_file("1/test2.txt", test_file_path)
+        manager.upload_file("2/test3.txt", test_file_path)
+        manager.upload_file("2/test4.txt", test_file_path)
 
-    # 列举所有文件
-    files = manager.list_all_keys()
-    wayne_print(f'{files=}', 'red')
+        # 2. 测试上传文件夹
+        wayne_print("\n2. 测试上传文件夹", "cyan")
+        manager.upload_directory(test_dir_path, "test_dir")
 
-    # 上传文件
-    manager.upload_file('test.txt', 'test.txt')
-    manager.upload_file('1/test.txt', 'test.txt')
-    manager.upload_file('1/test2.txt', 'test.txt')
-    manager.upload_file('2/test3.txt', 'test.txt')
-    manager.upload_file('2/test4.txt', 'test.txt')
+        # 3. 上传文本
+        wayne_print("\n3. 测试上传文本", "cyan")
+        manager.upload_text("hello.txt", "Hello, World!")
+        manager.upload_text("test.txt", "Hello, World!")
 
-    # 上传文本
-    manager.upload_text('hello.txt', 'Hello, World!')
-    manager.upload_text('test.txt', 'Hello, World!')
+        # 4. 列举所有文件
+        wayne_print("\n4. 测试列举文件", "cyan")
+        files = manager.list_all_keys()
+        wayne_print("文件列表：", "magenta")
+        for file in files:
+            wayne_print(f"  - {file}", "magenta")
 
-    # 上传图片
-    img = cv2.imread('/path/to/image')
-    manager.upload_image('images/test.png', img)
+        # 5. 列举指定前缀的文件
+        wayne_print("\n5. 测试列举指定前缀的文件", "cyan")
+        files_with_prefix = manager.list_keys_with_prefix("1/")
+        wayne_print("前缀为 '1/' 的文件列表：", "magenta")
+        for file in files_with_prefix:
+            wayne_print(f"  - {file}", "magenta")
 
-    # 删除文件
-    manager.delete_file('test.txt')
+        # 6. 下载文件
+        wayne_print("\n6. 测试下载文件", "cyan")
+        manager.download_file("test.txt")
+        manager.download_file("1/test.txt", "downloads")
 
-    # 删除指定前缀的所有文件
-    manager.delete_files_with_prefix('')
+        # 7. 测试下载文件夹
+        wayne_print("\n7. 测试下载文件夹", "cyan")
+        manager.download_directory("test_dir/", "downloads")
+
+        # 8. 下载指定前缀的文件
+        wayne_print("\n8. 测试下载指定前缀的文件", "cyan")
+        manager.download_files_with_prefix("2/", "downloads")
+
+        # 9. 删除文件
+        wayne_print("\n9. 测试删除文件", "cyan")
+        manager.delete_file("test.txt")
+        manager.delete_file("hello.txt")
+
+        # 10. 删除指定前缀的文件
+        wayne_print("\n10. 测试删除指定前缀的文件", "cyan")
+        manager.delete_files_with_prefix("1/")
+        manager.delete_files_with_prefix("2/")
+        manager.delete_files_with_prefix("test_dir/")
+
+    finally:
+        # 清理测试文件
+        if os.path.exists(test_file_path):
+            os.remove(test_file_path)
+        if os.path.exists(test_dir_path):
+            shutil.rmtree(test_dir_path)
+        if os.path.exists("downloads"):
+            shutil.rmtree("downloads")

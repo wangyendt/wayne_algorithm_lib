@@ -4,7 +4,7 @@ __all__ = [
     'tools',
     'dsp',
     'gui',
-    'math',
+    'maths',
     'data_structure',
     'plot',
     'ahrs',

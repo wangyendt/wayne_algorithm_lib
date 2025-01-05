@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 """ 
 @author: Wang Ye (Wayne)
-@file: math.py
+@file: maths.py
 @time: 2022/03/01
 @contact: wangye@oppo.com
 @site: 
