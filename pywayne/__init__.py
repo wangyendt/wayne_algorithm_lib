@@ -12,6 +12,8 @@ __all__ = [
     'lark_custom_bot',
     'lark_bot',
     'tts',
+    'aliyun_oss',
+    'helper',
     # 'tt_api',
     # 'ocs_api',
 ]
