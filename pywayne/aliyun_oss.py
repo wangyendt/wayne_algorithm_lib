@@ -363,6 +363,48 @@ class OssManager:
 
         return success
 
+    def list_directory_contents(self, prefix: str, sort: bool = True) -> List[tuple[str, bool]]:
+        """
+        列出指定文件夹下的所有文件和子文件夹（不深入子文件夹）
+
+        Args:
+            prefix: OSS 中的前缀路径
+            sort: 是否排序，默认为 True
+
+        Returns:
+            包含 (name, is_directory) 元组的列表，name 是文件或文件夹名，is_directory 表示是否是文件夹
+        """
+        contents: List[tuple[str, bool]] = []
+        normalized_prefix = prefix if prefix.endswith('/') else prefix + '/'
+
+        # 获取所有以该前缀开头的文件
+        all_keys = self.list_keys_with_prefix(normalized_prefix)
+
+        # 处理每个 key
+        for key in all_keys:
+            # 移除前缀，得到相对路径
+            relative_path = key[len(normalized_prefix):]
+            components = relative_path.split('/')
+
+            # 只处理第一级目录下的内容
+            if components and components[0]:
+                if len(components) == 1:
+                    # 这是一个文件
+                    contents.append((components[0], False))
+                else:
+                    # 这是一个目录
+                    dir_name = components[0]
+                    # 检查是否已经添加过这个目录
+                    if not any(item[0] == dir_name and item[1] for item in contents):
+                        contents.append((dir_name, True))
+
+        if sort:
+            # 先按类型排序（目录在前），再按名称排序
+            contents.sort(key=lambda x: (not x[1], x[0]))
+
+        self._print_info(f"成功获取目录 '{normalized_prefix}' 的内容，共 {len(contents)} 项")
+        return contents
+
 
 if __name__ == '__main__':
     import shutil
@@ -424,26 +466,46 @@ if __name__ == '__main__':
         for file in files_with_prefix:
             wayne_print(f"  - {file}", "magenta")
 
-        # 6. 下载文件
-        wayne_print("\n6. 测试下载文件", "cyan")
+        # 6. 测试列举目录内容
+        wayne_print("\n6. 测试列举目录内容", "cyan")
+        # 列举根目录
+        wayne_print("根目录内容：", "magenta")
+        root_contents = manager.list_directory_contents("")
+        for name, is_dir in root_contents:
+            wayne_print(f"  {'📁' if is_dir else '📄'} {name}{'/' if is_dir else ''}", "magenta")
+
+        # 列举 test_dir 目录
+        wayne_print("\ntest_dir 目录内容：", "magenta")
+        test_dir_contents = manager.list_directory_contents("test_dir")
+        for name, is_dir in test_dir_contents:
+            wayne_print(f"  {'📁' if is_dir else '📄'} {name}{'/' if is_dir else ''}", "magenta")
+
+        # 列举 1 目录
+        wayne_print("\n1 目录内容：", "magenta")
+        dir1_contents = manager.list_directory_contents("1")
+        for name, is_dir in dir1_contents:
+            wayne_print(f"  {'📁' if is_dir else '📄'} {name}{'/' if is_dir else ''}", "magenta")
+
+        # 7. 下载文件
+        wayne_print("\n7. 测试下载文件", "cyan")
         manager.download_file("test.txt")
         manager.download_file("1/test.txt", "downloads")
 
-        # 7. 测试下载文件夹
-        wayne_print("\n7. 测试下载文件夹", "cyan")
+        # 8. 测试下载文件夹
+        wayne_print("\n8. 测试下载文件夹", "cyan")
         manager.download_directory("test_dir/", "downloads")
 
-        # 8. 下载指定前缀的文件
-        wayne_print("\n8. 测试下载指定前缀的文件", "cyan")
+        # 9. 下载指定前缀的文件
+        wayne_print("\n9. 测试下载指定前缀的文件", "cyan")
         manager.download_files_with_prefix("2/", "downloads")
 
-        # 9. 删除文件
-        wayne_print("\n9. 测试删除文件", "cyan")
+        # 10. 删除文件
+        wayne_print("\n10. 测试删除文件", "cyan")
         manager.delete_file("test.txt")
         manager.delete_file("hello.txt")
 
-        # 10. 删除指定前缀的文件
-        wayne_print("\n10. 测试删除指定前缀的文件", "cyan")
+        # 11. 删除指定前缀的文件
+        wayne_print("\n11. 测试删除指定前缀的文件", "cyan")
         manager.delete_files_with_prefix("1/")
         manager.delete_files_with_prefix("2/")
         manager.delete_files_with_prefix("test_dir/")
