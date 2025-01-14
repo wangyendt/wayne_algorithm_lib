@@ -342,22 +342,42 @@ class WelfordStd:
 
 
 class OneEuroFilter:
-    """
-    常用于pose tracking等场景
-    低速时去抖，高速时紧跟
-    https://gery.casiez.net/1euro/
-    https://gery.casiez.net/1euro/InteractiveDemo/
+    """One Euro Filter implementation for smooth signal filtering.
+
+    A speed-adaptive low-pass filter particularly useful for noisy signals like motion tracking data.
+    The filter adapts its cutoff frequency based on speed:
+    - At low speeds, it reduces jitter and smooths the signal
+    - At high speeds, it reduces lag and follows fast changes
+
+    Parameters
+    ----------
+    te : float, optional
+        Sampling period in seconds. Can be set during initialization or in first apply() call.
+    mincutoff : float, default=1.0
+        Minimum cutoff frequency in Hz. Lower values result in smoother filtering
+        but may introduce more lag.
+    beta : float, default=0.007
+        Speed coefficient. Higher values make the filter more aggressive at
+        following quick changes.
+    dcutoff : float, default=1.0
+        Cutoff frequency for derivative in Hz.
+
+    References
+    ----------
+    - Casiez et al. (2012): https://gery.casiez.net/1euro/
+    - https://gery.casiez.net/1euro/
+    - https://gery.casiez.net/1euro/InteractiveDemo/
     """
 
     def __init__(self, te=None, mincutoff=1.0, beta=0.007, dcutoff=1.0):
         self._val = None
         self._dx = 0
         self._te = te
+        self._alpha = None
+        self._dalpha = None
         self._mincutoff = mincutoff
         self._beta = beta
         self._dcutoff = dcutoff
-        self._alpha = self._calc_alpha(self._mincutoff)
-        self._dalpha = self._calc_alpha(self._dcutoff)
 
     def _calc_alpha(self, cutoff):
         tau = 1.0 / (2 * np.pi * cutoff)
@@ -367,6 +387,9 @@ class OneEuroFilter:
         result = val
         if self._te is None:
             self._te = te
+        if self._alpha is None:
+            self._alpha = self._calc_alpha(self._mincutoff)
+            self._dalpha = self._calc_alpha(self._dcutoff)
         if self._val is not None:
             edx = (val - self._val) / self._te
             self._dx = self._dx + (self._dalpha * (edx - self._dx))
