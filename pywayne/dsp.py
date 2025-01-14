@@ -65,7 +65,7 @@ def peak_det(v, delta, x=None):
     if delta <= 0:
         print('Input argument delta must be positive')
 
-    mn, mx = np.Inf, -np.Inf
+    mn, mx = np.inf, -np.inf
     mnpos, mxpos = np.NaN, np.NaN
 
     lookformax = True
