@@ -349,27 +349,29 @@ class OneEuroFilter:
     https://gery.casiez.net/1euro/InteractiveDemo/
     """
 
-    def __init__(self, te, mincutoff=1.0, beta=0.007, dcutoff=1.0):
+    def __init__(self, te=None, mincutoff=1.0, beta=0.007, dcutoff=1.0):
         self._val = None
         self._dx = 0
         self._te = te
         self._mincutoff = mincutoff
         self._beta = beta
         self._dcutoff = dcutoff
-        self._alpha = self._alpha(self._mincutoff)
-        self._dalpha = self._alpha(self._dcutoff)
+        self._alpha = self._calc_alpha(self._mincutoff)
+        self._dalpha = self._calc_alpha(self._dcutoff)
 
-    def _alpha(self, cutoff):
+    def _calc_alpha(self, cutoff):
         tau = 1.0 / (2 * np.pi * cutoff)
         return 1.0 / (1.0 + tau / self._te)
 
-    def apply(self, val: float, te: float) -> float:
+    def apply(self, val: float, te: float = 0.0) -> float:
         result = val
+        if self._te is None:
+            self._te = te
         if self._val is not None:
-            edx = (val - self._val) / te
+            edx = (val - self._val) / self._te
             self._dx = self._dx + (self._dalpha * (edx - self._dx))
             cutoff = self._mincutoff + self._beta * abs(self._dx)
-            self._alpha = self._alpha(cutoff)
+            self._alpha = self._calc_alpha(cutoff)
             result = self._val + self._alpha * (val - self._val)
         self._val = result
         return result
