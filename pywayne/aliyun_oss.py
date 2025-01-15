@@ -405,6 +405,43 @@ class OssManager:
         self._print_info(f"成功获取目录 '{normalized_prefix}' 的内容，共 {len(contents)} 项")
         return contents
 
+    def read_file_content(self, key: str) -> Optional[str]:
+        """
+        读取 OSS 上指定文件的内容
+
+        Args:
+            key: OSS 中的键值
+
+        Returns:
+            文件内容字符串，如果读取失败则返回 None
+        """
+        try:
+            # 检查是否为文件夹（通过检查是否以'/'结尾或是否有子文件）
+            if key.endswith('/'):
+                self._print_warning(f"指定的键值 '{key}' 是一个文件夹")
+                return None
+                
+            # 直接使用 bucket.list_objects 检查是否有子文件
+            for _ in oss2.ObjectIterator(self.bucket, prefix=key + '/', delimiter='/', max_keys=1):
+                self._print_warning(f"指定的键值 '{key}' 是一个文件夹")
+                return None
+
+            # 获取文件对象
+            object_stream = self.bucket.get_object(key)
+            
+            # 读取内容并解码
+            content = object_stream.read().decode('utf-8')
+            
+            self._print_info(f"成功读取文件内容：{key}")
+            return content
+            
+        except oss2.exceptions.NoSuchKey:
+            self._print_warning(f"文件不存在：{key}")
+            return None
+        except Exception as e:
+            self._print_warning(f"读取文件失败：{str(e)}")
+            return None
+
 
 if __name__ == '__main__':
     import shutil
@@ -486,26 +523,43 @@ if __name__ == '__main__':
         for name, is_dir in dir1_contents:
             wayne_print(f"  {'📁' if is_dir else '📄'} {name}{'/' if is_dir else ''}", "magenta")
 
-        # 7. 下载文件
-        wayne_print("\n7. 测试下载文件", "cyan")
+        # 7. 测试读取文件内容
+        wayne_print("\n7. 测试读取文件内容", "cyan")
+        # 读取文本文件
+        content = manager.read_file_content("test.txt")
+        if content is not None:
+            wayne_print(f"test.txt 的内容：\n{content}", "magenta")
+        
+        # 尝试读取文件夹（应该会失败）
+        content = manager.read_file_content("test_dir/")
+        if content is None:
+            wayne_print("成功检测到文件夹，拒绝读取", "magenta")
+        
+        # 读取不存在的文件
+        content = manager.read_file_content("nonexistent.txt")
+        if content is None:
+            wayne_print("成功检测到文件不存在", "magenta")
+
+        # 8. 下载文件
+        wayne_print("\n8. 测试下载文件", "cyan")
         manager.download_file("test.txt")
         manager.download_file("1/test.txt", "downloads")
 
-        # 8. 测试下载文件夹
-        wayne_print("\n8. 测试下载文件夹", "cyan")
+        # 9. 测试下载文件夹
+        wayne_print("\n9. 测试下载文件夹", "cyan")
         manager.download_directory("test_dir/", "downloads")
 
-        # 9. 下载指定前缀的文件
-        wayne_print("\n9. 测试下载指定前缀的文件", "cyan")
+        # 10. 下载指定前缀的文件
+        wayne_print("\n10. 测试下载指定前缀的文件", "cyan")
         manager.download_files_with_prefix("2/", "downloads")
 
-        # 10. 删除文件
-        wayne_print("\n10. 测试删除文件", "cyan")
+        # 11. 删除文件
+        wayne_print("\n11. 测试删除文件", "cyan")
         manager.delete_file("test.txt")
         manager.delete_file("hello.txt")
 
-        # 11. 删除指定前缀的文件
-        wayne_print("\n11. 测试删除指定前缀的文件", "cyan")
+        # 12. 删除指定前缀的文件
+        wayne_print("\n12. 测试删除指定前缀的文件", "cyan")
         manager.delete_files_with_prefix("1/")
         manager.delete_files_with_prefix("2/")
         manager.delete_files_with_prefix("test_dir/")
