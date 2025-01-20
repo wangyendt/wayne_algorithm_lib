@@ -11,6 +11,7 @@ __all__ = [
     'calibration',
     'lark_custom_bot',
     'lark_bot',
+    'lark_bot_listener',
     'tts',
     'aliyun_oss',
     'helper',
