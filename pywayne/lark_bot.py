@@ -1039,3 +1039,126 @@ class LarkBot:
             lark.logger.info(f"File downloaded successfully and saved to {save_path}")
         except Exception as e:
             lark.logger.error(f"Exception occurred while downloading file: {e}")
+
+
+if __name__ == '__main__':
+    # 创建机器人实例
+    bot = LarkBot(
+        app_id="cli_a785d99779791013",
+        app_secret="bt1JJe4iOy3L7ifsSZsOddDm5xV4xjAT"
+    )
+
+    try:
+        # 1. 获取群组列表
+        group_list = bot.get_group_list()
+        print("群组列表:")
+        print(json.dumps(group_list, indent=2, ensure_ascii=False))
+
+        # 2. 获取特定群组的ID
+        group_chat_ids = bot.get_group_chat_id_by_name("测试3")
+        if not group_chat_ids:
+            print("未找到群组")
+            exit(1)
+        group_chat_id = group_chat_ids[0]
+
+        # 3. 获取群成员信息
+        members = bot.get_members_in_group_by_group_chat_id(group_chat_id)
+        print("群成员:")
+        print(json.dumps(members, indent=2, ensure_ascii=False))
+
+        # 4. 获取特定成员的 open_id
+        member_open_ids = bot.get_member_open_id_by_name(group_chat_id, "王也")
+        if not member_open_ids:
+            print("未找到指定成员")
+            exit(1)
+        specific_member_user_open_id = member_open_ids[0]
+
+        # 5. 获取用户信息
+        user_infos = bot.get_user_info(emails=[], mobiles=["13267080069"])
+        print("用户信息:")
+        print(json.dumps(user_infos, indent=2, ensure_ascii=False))
+
+        if not user_infos:
+            print("未找到用户信息")
+            exit(1)
+        user_open_id = user_infos[0].get("user_id")
+
+        # 6. 发送文本消息
+        # 6.1 发送普通文本消息
+        text_response = bot.send_text_to_user(user_open_id, "Hello, this is a single chat.\nYou know?")
+        print("发送文本消息响应:", json.dumps(text_response, indent=2, ensure_ascii=False))
+
+        # 6.2 发送带格式的文本消息
+        some_text = TextContent.make_at_someone_pattern(specific_member_user_open_id, "hi", "open_id")
+        some_text += TextContent.make_at_all_pattern()
+        some_text += TextContent.make_bold_pattern("notice")
+        some_text += TextContent.make_italian_pattern("italian")
+        some_text += TextContent.make_underline_pattern("underline")
+        some_text += TextContent.make_delete_line_pattern("delete line")
+        some_text += TextContent.make_url_pattern("www.baidu.com", "百度")
+
+        formatted_text_response = bot.send_text_to_chat(group_chat_id, f"Hi, this is a group.\n{some_text}")
+        print("发送格式化文本消息响应:", json.dumps(formatted_text_response, indent=2, ensure_ascii=False))
+
+        # 7. 上传和发送图片
+        image_path = "/Users/wayne/Downloads/IMU标定和姿态结算.drawio.png"
+        image_key = bot.upload_image(image_path)
+        if image_key:
+            image_to_user_response = bot.send_image_to_user(user_open_id, image_key)
+            print("发送图片到用户响应:", json.dumps(image_to_user_response, indent=2, ensure_ascii=False))
+
+            image_to_chat_response = bot.send_image_to_chat(group_chat_id, image_key)
+            print("发送图片到群组响应:", json.dumps(image_to_chat_response, indent=2, ensure_ascii=False))
+
+        # 8. 分享群组和用户
+        share_chat_to_user_response = bot.send_shared_chat_to_user(user_open_id, group_chat_id)
+        print("分享群组到用户响应:", json.dumps(share_chat_to_user_response, indent=2, ensure_ascii=False))
+
+        share_chat_to_chat_response = bot.send_shared_chat_to_chat(group_chat_id, group_chat_id)
+        print("分享群组到群组响应:", json.dumps(share_chat_to_chat_response, indent=2, ensure_ascii=False))
+
+        share_user_to_user_response = bot.send_shared_user_to_user(user_open_id, user_open_id)
+        print("分享用户到用户响应:", json.dumps(share_user_to_user_response, indent=2, ensure_ascii=False))
+
+        share_user_to_chat_response = bot.send_shared_user_to_chat(group_chat_id, user_open_id)
+        print("分享用户到群组响应:", json.dumps(share_user_to_chat_response, indent=2, ensure_ascii=False))
+
+        # 9. 上传和发送文件
+        file_path = "/Users/wayne/Downloads/test.txt"
+        file_key = bot.upload_file(file_path)
+        if file_key:
+            file_to_user_response = bot.send_file_to_user(user_open_id, file_key)
+            print("发送文件到用户响应:", json.dumps(file_to_user_response, indent=2, ensure_ascii=False))
+
+            file_to_chat_response = bot.send_file_to_chat(group_chat_id, file_key)
+            print("发送文件到群组响应:", json.dumps(file_to_chat_response, indent=2, ensure_ascii=False))
+
+        # 10. 发送富文本消息
+        post = PostContent(title="我是标题")
+
+        # 添加文本内容
+        line1 = post.make_text_content(text="这是第一行", styles=["bold"])
+        post.add_content_in_new_line(line1)
+
+        # 添加@提醒
+        line3 = post.make_at_content(specific_member_user_open_id, styles=["bold", "italic"])
+        post.add_content_in_new_line(line3)
+
+        # 添加表情和Markdown
+        line4_1 = post.make_emoji_content("OK")
+        line4_2 = post.make_markdown_content("**helloworld**")
+        post.add_content_in_new_line(line4_1)
+        post.add_content_in_line(line4_2)
+
+        # 添加代码块
+        line6 = post.make_code_block_content(language="python", text='print("Hello, World!")')
+        post.add_content_in_new_line(line6)
+
+        # 发送富文本消息
+        post_response = bot.send_post_to_chat(group_chat_id, post.get_content())
+        print("发送富文本消息响应:", json.dumps(post_response, indent=2, ensure_ascii=False))
+
+        print("所有示例执行完成")
+
+    except Exception as e:
+        print(f"错误: {str(e)}")
