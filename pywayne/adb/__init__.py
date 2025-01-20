@@ -8,8 +8,6 @@
 # code is far away from bugs.
 
 
-from . import logcat_reader
-
-__all_ = [
-    'logcat_reader.py'
+__all__ = [
+    'logcat_reader'
 ]

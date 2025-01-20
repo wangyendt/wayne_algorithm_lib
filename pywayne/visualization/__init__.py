@@ -8,8 +8,6 @@
 # code is far away from bugs.
 
 
-from . import pangolin
-
-__all_ = [
-    'pangolin.py'
+__all__ = [
+    'pangolin'
 ]
