@@ -13,7 +13,7 @@ import platform
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import lark_oapi as lark
 from lark_oapi.api.contact.v3 import *
 from lark_oapi.api.im.v1 import *
@@ -1146,6 +1146,37 @@ class LarkBot:
         except Exception as e:
             lark.logger.error(f"下载消息资源时发生错误: {e}")
             return {}
+
+    def get_chat_and_user_name(self, chat_id: str, user_id: str) -> Tuple[str, str]:
+        """
+        获取群聊名称和用户名称
+        
+        Args:
+            chat_id: 会话ID
+            user_id: 用户ID
+            
+        Returns:
+            Tuple[str, str]: (群聊名称, 用户名称)，如果是私聊则群聊名称为空字符串
+        """
+        # 获取群聊信息
+        chat_name = ""
+        request = lark.api.im.v1.GetChatRequest.builder().chat_id(chat_id).build()
+        response = self.client.im.v1.chat.get(request)
+        if response.success():
+            chat_name = response.data.name
+        else:
+            print(f"获取群聊信息失败: {response.code}, {response.msg}")
+            
+        # 获取用户信息
+        user_name = ""
+        request = lark.api.contact.v3.GetUserRequest.builder().user_id(user_id).build()
+        response = self.client.contact.v3.user.get(request)
+        if response.success():
+            user_name = response.data.user.name
+        else:
+            print(f"获取用户信息失败: {response.code}, {response.msg}")
+            
+        return chat_name, user_name
 
 
 if __name__ == '__main__':

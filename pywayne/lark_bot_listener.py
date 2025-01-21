@@ -124,7 +124,7 @@ class LarkBotListener:
                     return
 
                 chat_id = data.event.message.chat_id
-                user_id = data.event.sender.sender_id.user_id
+                user_id = data.event.sender.sender_id.open_id
                 chat_type = data.event.message.chat_type
                 is_group = chat_type == "group"
 
@@ -216,15 +216,43 @@ class LarkBotListener:
             group_only: 是否只处理群组消息
             user_only: 是否只处理私聊消息
             
-        装饰的函数应该接受以下参数：
-            text (str): 文本内容
-            chat_id (str): 会话ID
-            is_group (bool): 是否群组消息
+        装饰的函数可以接受以下参数（除text外都是可选的）：
+            text (str): 文本内容（必需）
+            chat_id (str, optional): 会话ID
+            is_group (bool, optional): 是否群组消息
+            group_name (str, optional): 群组名称（私聊时为空字符串）
+            user_name (str, optional): 发送消息的用户姓名
         """
-        def decorator(func: Callable[[str, str, bool], None]):
+        def decorator(func):
+            import inspect
+            sig = inspect.signature(func)
+            param_names = list(sig.parameters.keys())
+
             @self.listen(message_type="text", group_only=group_only, user_only=user_only)
             async def wrapper(ctx: MessageContext):
-                await func(ctx.content, ctx.chat_id, ctx.is_group)
+                try:
+                    # 获取群组名称和用户姓名
+                    group_name, user_name = self.bot.get_chat_and_user_name(ctx.chat_id, ctx.user_id)
+
+                    # 根据函数参数构建调用参数
+                    kwargs = {}
+                    if 'text' in param_names:
+                        kwargs['text'] = ctx.content
+                    if 'chat_id' in param_names:
+                        kwargs['chat_id'] = ctx.chat_id
+                    if 'is_group' in param_names:
+                        kwargs['is_group'] = ctx.is_group
+                    if 'group_name' in param_names:
+                        kwargs['group_name'] = group_name
+                    if 'user_name' in param_names:
+                        kwargs['user_name'] = user_name
+
+                    # 调用用户处理函数
+                    await func(**kwargs)
+                except Exception as e:
+                    print(f"处理文本消息时发生错误: {e}")
+                    import traceback
+                    print(f"错误详情:\n{traceback.format_exc()}")
             return wrapper
         return decorator
 
@@ -236,17 +264,24 @@ class LarkBotListener:
             group_only: 是否只处理群组消息
             user_only: 是否只处理私聊消息
             
-        装饰的函数应该接受以下参数：
-            image_path (Path): 临时图片文件路径
-            chat_id (str): 会话ID
-            is_group (bool): 是否群组消息
+        装饰的函数可以接受以下参数（除image_path外都是可选的）：
+            image_path (Path): 临时图片文件路径（必需）
+            chat_id (str, optional): 会话ID
+            is_group (bool, optional): 是否群组消息
+            group_name (str, optional): 群组名称（私聊时为空字符串）
+            user_name (str, optional): 发送消息的用户姓名
             
         函数可以返回一个新的图片路径，该图片会被发送回去
         如果返回None，则不发送任何图片
         """
-        def decorator(func: Callable[[Path, str, bool], Optional[Path]]):
+        def decorator(func):
+            import inspect
+            sig = inspect.signature(func)
+            param_names = list(sig.parameters.keys())
+
             @self.listen(message_type="image", group_only=group_only, user_only=user_only)
             async def wrapper(ctx: MessageContext):
+                result_path = None
                 try:
                     image_key = json.loads(ctx.content).get("image_key")
                     if not image_key:
@@ -263,8 +298,24 @@ class LarkBotListener:
                             print("图片下载失败")
                             return
 
+                        # 获取群组名称和用户姓名
+                        group_name, user_name = self.bot.get_chat_and_user_name(ctx.chat_id, ctx.user_id)
+
+                        # 根据函数参数构建调用参数
+                        kwargs = {}
+                        if 'image_path' in param_names:
+                            kwargs['image_path'] = temp_image_path
+                        if 'chat_id' in param_names:
+                            kwargs['chat_id'] = ctx.chat_id
+                        if 'is_group' in param_names:
+                            kwargs['is_group'] = ctx.is_group
+                        if 'group_name' in param_names:
+                            kwargs['group_name'] = group_name
+                        if 'user_name' in param_names:
+                            kwargs['user_name'] = user_name
+
                         # 调用用户处理函数
-                        result_path = await func(temp_image_path, ctx.chat_id, ctx.is_group)
+                        result_path = await func(**kwargs)
                         
                         # 如果返回了新图片路径，发送回去
                         if result_path is not None:
@@ -292,17 +343,24 @@ class LarkBotListener:
             group_only: 是否只处理群组消息
             user_only: 是否只处理私聊消息
             
-        装饰的函数应该接受以下参数：
-            file_path (Path): 临时文件路径
-            chat_id (str): 会话ID
-            is_group (bool): 是否群组消息
+        装饰的函数可以接受以下参数（除file_path外都是可选的）：
+            file_path (Path): 临时文件路径（必需）
+            chat_id (str, optional): 会话ID
+            is_group (bool, optional): 是否群组消息
+            group_name (str, optional): 群组名称（私聊时为空字符串）
+            user_name (str, optional): 发送消息的用户姓名
             
         函数可以返回一个新的文件路径，该文件会被发送回去
         如果返回None，则不发送任何文件
         """
-        def decorator(func: Callable[[Path, str, bool], Optional[Path]]):
+        def decorator(func):
+            import inspect
+            sig = inspect.signature(func)
+            param_names = list(sig.parameters.keys())
+
             @self.listen(message_type="file", group_only=group_only, user_only=user_only)
             async def wrapper(ctx: MessageContext):
+                result_path = None
                 try:
                     file_key = json.loads(ctx.content).get("file_key")
                     if not file_key:
@@ -319,8 +377,24 @@ class LarkBotListener:
                             print("文件下载失败")
                             return
 
+                        # 获取群组名称和用户姓名
+                        group_name, user_name = self.bot.get_chat_and_user_name(ctx.chat_id, ctx.user_id)
+
+                        # 根据函数参数构建调用参数
+                        kwargs = {}
+                        if 'file_path' in param_names:
+                            kwargs['file_path'] = temp_file_path
+                        if 'chat_id' in param_names:
+                            kwargs['chat_id'] = ctx.chat_id
+                        if 'is_group' in param_names:
+                            kwargs['is_group'] = ctx.is_group
+                        if 'group_name' in param_names:
+                            kwargs['group_name'] = group_name
+                        if 'user_name' in param_names:
+                            kwargs['user_name'] = user_name
+
                         # 调用用户处理函数
-                        result_path = await func(temp_file_path, ctx.chat_id, ctx.is_group)
+                        result_path = await func(**kwargs)
                         
                         # 如果返回了新文件路径，发送回去
                         if result_path is not None:
@@ -362,7 +436,7 @@ if __name__ == "__main__":
     
     # 示例1：AI文本处理（高级接口）
     @listener.text_handler()
-    async def handle_text(text: str, chat_id: str, is_group: bool):
+    async def handle_text(text: str, chat_id: str, is_group: bool, group_name: str, user_name: str):
         try:
             print(f"开始处理AI回复...")
             # 获取对应的聊天机器人实例
@@ -372,15 +446,15 @@ if __name__ == "__main__":
             response = await loop.run_in_executor(None, lambda: ''.join(chat_bot.chat(text, stream=True)))
             print(f"AI回复: {response}")
             # 发送AI回复到飞书
-            listener.send_message(chat_id, response)
+            listener.send_message(chat_id, f'Hi, {group_name} - {user_name}\n{response}')
         except Exception as e:
             print(f"AI处理消息时发生错误: {e}")
             listener.send_message(chat_id, f"抱歉，处理消息时发生错误: {e}")
 
     # 示例2：简单的图片处理（高级接口）
     @listener.image_handler()
-    async def handle_image(image_path: Path) -> Optional[Path]:
-        print(f"处理图片: {image_path}")
+    async def handle_image(image_path: Path, chat_id: str, is_group: bool, group_name: str, user_name: str) -> Optional[Path]:
+        print(f"处理图片: {image_path} from {group_name} - {user_name}")
         # 检测并绘制AprilTag
         detected_image = detector.detect_and_draw(image_path)
         # 保存处理后的图片到新的临时文件
@@ -391,8 +465,8 @@ if __name__ == "__main__":
 
     # 示例3：简单的文件处理（高级接口）
     @listener.file_handler()
-    async def handle_file(file_path: Path) -> Optional[Path]:
-        print(f"收到文件: {file_path}")
+    async def handle_file(file_path: Path, chat_id: str, is_group: bool, group_name: str, user_name: str) -> Optional[Path]:
+        print(f"收到文件: {file_path} from {group_name} - {user_name}")
         return file_path  # 直接返回原文件路径，会自动发送并清理
 
     # ====== 使用原始接口的示例 ======
