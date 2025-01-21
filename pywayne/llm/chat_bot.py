@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any, Generator, Union
 from openai import OpenAI
+import time
 
 
 class LLMChat:
@@ -178,6 +179,75 @@ class LLMChat:
             List[Dict[str, str]]: 对话历史列表
         """
         return self._history.copy()
+
+
+class ChatManager:
+    """聊天管理器，用于管理多个聊天实例"""
+    def __init__(self, base_url: str, api_key: str, timeout: int = 3600):
+        """
+        初始化聊天管理器
+        
+        Args:
+            base_url: API基础URL
+            api_key: API密钥
+            timeout: 会话超时时间（秒）
+        """
+        self.base_url = base_url
+        self.api_key = api_key
+        self.timeout = timeout
+        self.chats: Dict[str, LLMChat] = {}
+        self.last_used: Dict[str, float] = {}  # 记录最后使用时间
+
+    def get_chat(self, chat_id: str) -> LLMChat:
+        """
+        获取或创建聊天实例
+        
+        Args:
+            chat_id: 聊天ID（可以是群组ID或用户ID）
+            
+        Returns:
+            LLMChat: 聊天实例
+        """
+        current_time = time.time()
+        # 清理超时的会话
+        self._cleanup_expired(current_time)
+        # 获取或创建会话
+        if chat_id not in self.chats:
+            print(f"为会话 {chat_id} 创建新的chat_bot")
+            self.chats[chat_id] = LLMChat(
+                base_url=self.base_url,
+                api_key=self.api_key
+            )
+        # 更新最后使用时间
+        self.last_used[chat_id] = current_time
+        return self.chats[chat_id]
+
+    def remove_chat(self, chat_id: str) -> None:
+        """
+        移除聊天实例
+        
+        Args:
+            chat_id: 聊天ID
+        """
+        if chat_id in self.chats:
+            del self.chats[chat_id]
+            if chat_id in self.last_used:
+                del self.last_used[chat_id]
+
+    def _cleanup_expired(self, current_time: float) -> None:
+        """
+        清理超时的会话
+        
+        Args:
+            current_time: 当前时间戳
+        """
+        expired = [
+            chat_id for chat_id, last_used in self.last_used.items()
+            if current_time - last_used > self.timeout
+        ]
+        for chat_id in expired:
+            print(f"清理超时会话: {chat_id}")
+            self.remove_chat(chat_id)
 
 
 if __name__ == '__main__':

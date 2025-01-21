@@ -961,9 +961,13 @@ class LarkBot:
                     f"client.im.v1.image.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
                 return
 
+            # 确保目标文件夹存在
+            save_path = Path(image_save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Save the image
-            with open(image_save_path, "wb") as f:
-                f.write(response.file.read())
+            save_path.write_bytes(response.file.read())
+            
         except Exception as e:
             lark.logger.error(f"Exception occurred while downloading image: {e}")
 
@@ -1033,12 +1037,115 @@ class LarkBot:
             if save_path.is_dir():
                 save_path = save_path / Path(response.file_name)
 
+            # 确保目标文件夹存在
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Save the file
-            with open(save_path, "wb") as f:
-                f.write(response.file.read())
+            save_path.write_bytes(response.file.read())
             lark.logger.info(f"File downloaded successfully and saved to {save_path}")
+            
         except Exception as e:
             lark.logger.error(f"Exception occurred while downloading file: {e}")
+
+    def download_message_resource(self, message_id: str, resource_type: str, save_path: str, file_key: str = None) -> bool:
+        """
+        下载消息中的资源文件（图片、音频、视频、文件等）
+        :param message_id: 消息ID
+        :param resource_type: 资源类型，可选值：image、file、media、audio、video
+        :param save_path: 保存路径
+        :param file_key: 资源的key（image_key或file_key）
+        :return: 是否下载成功
+        """
+        try:
+            # 构造请求对象
+            request = GetMessageResourceRequest.builder() \
+                .message_id(message_id) \
+                .type(resource_type)
+
+            # 添加file_key（如果提供）
+            if file_key:
+                request = request.file_key(file_key)
+
+            request = request.build()
+
+            # 发起请求
+            response: GetMessageResourceResponse = self.client.im.v1.message_resource.get(request)
+
+            # 处理失败返回
+            if not response.success():
+                lark.logger.error(
+                    f"下载消息资源失败, code: {response.code}, msg: {response.msg}, "
+                    f"log_id: {response.get_log_id()}, resp: \n"
+                    f"{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}"
+                )
+                return False
+
+            # 确保目标文件夹存在
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # 保存文件
+            save_path.write_bytes(response.file.read())
+
+            lark.logger.info(f"消息资源已下载到: {save_path}")
+            return True
+
+        except Exception as e:
+            lark.logger.error(f"下载消息资源时发生错误: {e}")
+            return False
+
+    def download_message_resources(self, message_id: str, message_content: str, save_dir: str) -> Dict[str, str]:
+        """
+        下载消息中的所有资源文件
+        :param message_id: 消息ID
+        :param message_content: 消息内容（JSON字符串）
+        :param save_dir: 保存目录
+        :return: 资源类型到保存路径的映射
+        """
+        try:
+            # 解析消息内容
+            content = json.loads(message_content)
+            result = {}
+
+            # 确保保存目录存在
+            save_dir = Path(save_dir)
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            # 检查并下载图片
+            if "image_key" in content:
+                image_path = save_dir / f"image_{content['image_key']}.png"
+                if self.download_message_resource(message_id, "image", str(image_path), content['image_key']):
+                    result["image"] = str(image_path)
+
+            # 检查并下载文件
+            if "file_key" in content:
+                file_path = save_dir / f"file_{content['file_key']}"
+                if self.download_message_resource(message_id, "file", str(file_path), content['file_key']):
+                    result["file"] = str(file_path)
+
+            # 检查并下载音频
+            if "file_key" in content and content.get("type") == "audio":
+                audio_path = save_dir / f"audio_{content['file_key']}.mp3"
+                if self.download_message_resource(message_id, "audio", str(audio_path), content['file_key']):
+                    result["audio"] = str(audio_path)
+
+            # 检查并下载视频
+            if "file_key" in content and content.get("type") == "video":
+                video_path = save_dir / f"video_{content['file_key']}.mp4"
+                if self.download_message_resource(message_id, "video", str(video_path), content['file_key']):
+                    result["video"] = str(video_path)
+
+            # 检查并下载媒体文件
+            if "file_key" in content and content.get("type") == "media":
+                media_path = save_dir / f"media_{content['file_key']}"
+                if self.download_message_resource(message_id, "media", str(media_path), content['file_key']):
+                    result["media"] = str(media_path)
+
+            return result
+
+        except Exception as e:
+            lark.logger.error(f"下载消息资源时发生错误: {e}")
+            return {}
 
 
 if __name__ == '__main__':

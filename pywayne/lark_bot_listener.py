@@ -12,12 +12,16 @@ import functools
 import json
 import time
 import asyncio
+import cv2
+import tempfile
+from pathlib import Path
 from typing import Optional, Callable, Dict, Set, List
 from dataclasses import dataclass
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
-from pywayne.llm.chat_bot import LLMChat
 from pywayne.lark_bot import LarkBot, PostContent
+from pywayne.llm.chat_bot import ChatManager
+from pywayne.cv.apriltag_detector import ApriltagCornerDetector
 
 
 @dataclass
@@ -29,6 +33,7 @@ class MessageContext:
     content: str
     is_group: bool
     chat_type: str
+    message_id: str
 
 
 class LarkBotListener:
@@ -42,13 +47,15 @@ class LarkBotListener:
         self.app_id = app_id
         self.app_secret = app_secret
         self.message_expiry_time = message_expiry_time
+        
+        # 创建临时文件夹
+        self.temp_dir = Path(tempfile.gettempdir()) / "lark_bot_temp"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        print(f"创建临时文件夹: {self.temp_dir}")
 
         # 消息去重（每个处理函数独立去重）
         self.processed_messages: Dict[str, Set[str]] = {}  # handler_name -> set(message_ids)
         self.message_timestamps: Dict[str, Dict[str, float]] = {}  # handler_name -> {message_id: timestamp}
-
-        # 用户/群组的chat_bot缓存
-        self.chat_bots: Dict[str, LLMChat] = {}
 
         # 初始化飞书客户端
         self.client = lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
@@ -71,13 +78,6 @@ class LarkBotListener:
             self.processed_messages[handler_name].remove(msg_id)
             del self.message_timestamps[handler_name][msg_id]
 
-    def _get_or_create_chat_bot(self, chat_id: str, llm_config: dict) -> LLMChat:
-        """获取或创建新的chat_bot"""
-        if chat_id not in self.chat_bots:
-            print(f"为会话 {chat_id} 创建新的chat_bot")
-            self.chat_bots[chat_id] = LLMChat(**llm_config)
-        return self.chat_bots[chat_id]
-
     def send_message(self, chat_id: str, content: str):
         """发送消息到飞书（使用Markdown格式）"""
         try:
@@ -95,14 +95,12 @@ class LarkBotListener:
 
     def listen(self, message_type: Optional[str] = None,
                group_only: bool = False,
-               user_only: bool = False,
-               llm_config: Optional[dict] = None):
+               user_only: bool = False):
         """
         飞书消息监听装饰器
-        :param message_type: 消息类型，例如"text"，None表示所有类型
+        :param message_type: 消息类型，例如"text"、"image"、"file"、"post"，None表示所有类型
         :param group_only: 是否只监听群组消息
         :param user_only: 是否只监听用户消息
-        :param llm_config: LLM配置，如果提供则自动创建chat_bot
         """
 
         def decorator(func: Callable):
@@ -140,6 +138,8 @@ class LarkBotListener:
                 content = ""
                 if msg_type == "text":
                     content = json.loads(data.event.message.content)["text"]
+                elif msg_type in ["image", "file", "post"]:
+                    content = data.event.message.content
 
                 # 创建消息上下文
                 ctx = MessageContext(
@@ -148,16 +148,12 @@ class LarkBotListener:
                     message_type=msg_type,
                     content=content,
                     is_group=is_group,
-                    chat_type=chat_type
+                    chat_type=chat_type,
+                    message_id=message_id
                 )
 
-                # 如果提供了llm配置，获取对应的chat_bot
-                if llm_config:
-                    print(f"使用LLM配置处理消息: {content}")
-                    chat_bot = self._get_or_create_chat_bot(chat_id, llm_config)
-                    await func(ctx, chat_bot)
-                else:
-                    await func(ctx)
+                # 调用用户定义的处理函数
+                await func(ctx)
 
                 # 标记消息为已处理（仅针对当前处理函数）
                 self.processed_messages[handler_name].add(message_id)
@@ -173,7 +169,6 @@ class LarkBotListener:
 
     def run(self):
         """启动监听服务"""
-
         # 创建事件处理器
         def handle_message_receive(data: P2ImMessageReceiveV1) -> None:
             # 获取当前事件循环
@@ -213,6 +208,138 @@ class LarkBotListener:
         # 启动服务
         ws_client.start()
 
+    def text_handler(self, group_only: bool = False, user_only: bool = False):
+        """
+        文本消息处理装饰器，直接处理文本内容
+        
+        Args:
+            group_only: 是否只处理群组消息
+            user_only: 是否只处理私聊消息
+            
+        装饰的函数应该接受以下参数：
+            text (str): 文本内容
+            chat_id (str): 会话ID
+            is_group (bool): 是否群组消息
+        """
+        def decorator(func: Callable[[str, str, bool], None]):
+            @self.listen(message_type="text", group_only=group_only, user_only=user_only)
+            async def wrapper(ctx: MessageContext):
+                await func(ctx.content, ctx.chat_id, ctx.is_group)
+            return wrapper
+        return decorator
+
+    def image_handler(self, group_only: bool = False, user_only: bool = False):
+        """
+        图片消息处理装饰器，自动处理图片下载和清理
+        
+        Args:
+            group_only: 是否只处理群组消息
+            user_only: 是否只处理私聊消息
+            
+        装饰的函数应该接受以下参数：
+            image_path (Path): 临时图片文件路径
+            chat_id (str): 会话ID
+            is_group (bool): 是否群组消息
+            
+        函数可以返回一个新的图片路径，该图片会被发送回去
+        如果返回None，则不发送任何图片
+        """
+        def decorator(func: Callable[[Path, str, bool], Optional[Path]]):
+            @self.listen(message_type="image", group_only=group_only, user_only=user_only)
+            async def wrapper(ctx: MessageContext):
+                try:
+                    image_key = json.loads(ctx.content).get("image_key")
+                    if not image_key:
+                        print("未找到图片key")
+                        return
+
+                    # 创建临时文件
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                        temp_image_path = Path(temp_file.name)
+                    
+                    try:
+                        # 下载图片
+                        if not self.bot.download_message_resource(ctx.message_id, "image", str(temp_image_path), image_key):
+                            print("图片下载失败")
+                            return
+
+                        # 调用用户处理函数
+                        result_path = await func(temp_image_path, ctx.chat_id, ctx.is_group)
+                        
+                        # 如果返回了新图片路径，发送回去
+                        if result_path is not None:
+                            new_image_key = self.bot.upload_image(str(result_path))
+                            if new_image_key:
+                                self.bot.send_image_to_chat(ctx.chat_id, new_image_key)
+                    finally:
+                        # 清理临时文件
+                        temp_image_path.unlink(missing_ok=True)
+                        if result_path is not None and result_path != temp_image_path:
+                            result_path.unlink(missing_ok=True)
+                
+                except Exception as e:
+                    print(f"处理图片消息时发生错误: {str(e)}")
+                    import traceback
+                    print(f"错误详情:\n{traceback.format_exc()}")
+            return wrapper
+        return decorator
+
+    def file_handler(self, group_only: bool = False, user_only: bool = False):
+        """
+        文件消息处理装饰器，自动处理文件下载和清理
+        
+        Args:
+            group_only: 是否只处理群组消息
+            user_only: 是否只处理私聊消息
+            
+        装饰的函数应该接受以下参数：
+            file_path (Path): 临时文件路径
+            chat_id (str): 会话ID
+            is_group (bool): 是否群组消息
+            
+        函数可以返回一个新的文件路径，该文件会被发送回去
+        如果返回None，则不发送任何文件
+        """
+        def decorator(func: Callable[[Path, str, bool], Optional[Path]]):
+            @self.listen(message_type="file", group_only=group_only, user_only=user_only)
+            async def wrapper(ctx: MessageContext):
+                try:
+                    file_key = json.loads(ctx.content).get("file_key")
+                    if not file_key:
+                        print("未找到文件key")
+                        return
+
+                    # 创建临时文件
+                    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                        temp_file_path = Path(temp_file.name)
+                    
+                    try:
+                        # 下载文件
+                        if not self.bot.download_message_resource(ctx.message_id, "file", str(temp_file_path), file_key):
+                            print("文件下载失败")
+                            return
+
+                        # 调用用户处理函数
+                        result_path = await func(temp_file_path, ctx.chat_id, ctx.is_group)
+                        
+                        # 如果返回了新文件路径，发送回去
+                        if result_path is not None:
+                            new_file_key = self.bot.upload_file(str(result_path))
+                            if new_file_key:
+                                self.bot.send_file_to_chat(ctx.chat_id, new_file_key)
+                    finally:
+                        # 清理临时文件
+                        temp_file_path.unlink(missing_ok=True)
+                        if result_path is not None and result_path != temp_file_path:
+                            result_path.unlink(missing_ok=True)
+                
+                except Exception as e:
+                    print(f"处理文件消息时发生错误: {str(e)}")
+                    import traceback
+                    print(f"错误详情:\n{traceback.format_exc()}")
+            return wrapper
+        return decorator
+
 
 # 使用示例
 if __name__ == "__main__":
@@ -222,25 +349,61 @@ if __name__ == "__main__":
         app_secret="xxx"
     )
 
-
-    # 示例1：处理所有文本消息
-    @listener.listen(message_type="text")
-    async def handle_text(ctx: MessageContext):
-        print(f"收到消息: {ctx.content} (来自{'群组' if ctx.is_group else '私聊'})")
-
-
-    # 示例2：AI对话机器人（仅群组）
-    @listener.listen(
-        message_type="text",
-        # group_only=True,
-        llm_config={
-            "base_url": "https://api.deepseek.com/v1",
-            "api_key": "sk-xxx"
-        }
+    # 创建聊天管理器
+    chat_manager = ChatManager(
+        base_url="https://api.deepseek.com/v1",
+        api_key="xxx",
+        timeout=3600  # 1小时超时
     )
-    async def ai_chat(ctx: MessageContext, chat_bot: LLMChat):
+
+    detector = ApriltagCornerDetector()
+
+    # ====== 使用高级接口的示例 ======
+    
+    # 示例1：AI文本处理（高级接口）
+    @listener.text_handler()
+    async def handle_text(text: str, chat_id: str, is_group: bool):
         try:
             print(f"开始处理AI回复...")
+            # 获取对应的聊天机器人实例
+            chat_bot = chat_manager.get_chat(chat_id)
+            # 使用线程池执行同步的chat调用
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, lambda: ''.join(chat_bot.chat(text, stream=True)))
+            print(f"AI回复: {response}")
+            # 发送AI回复到飞书
+            listener.send_message(chat_id, response)
+        except Exception as e:
+            print(f"AI处理消息时发生错误: {e}")
+            listener.send_message(chat_id, f"抱歉，处理消息时发生错误: {e}")
+
+    # 示例2：简单的图片处理（高级接口）
+    @listener.image_handler()
+    async def handle_image(image_path: Path) -> Optional[Path]:
+        print(f"处理图片: {image_path}")
+        # 检测并绘制AprilTag
+        detected_image = detector.detect_and_draw(image_path)
+        # 保存处理后的图片到新的临时文件
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+            result_path = Path(temp_file.name)
+        cv2.imwrite(str(result_path), detected_image)
+        return result_path  # 返回处理后的图片路径，会自动发送并清理
+
+    # 示例3：简单的文件处理（高级接口）
+    @listener.file_handler()
+    async def handle_file(file_path: Path) -> Optional[Path]:
+        print(f"收到文件: {file_path}")
+        return file_path  # 直接返回原文件路径，会自动发送并清理
+
+    # ====== 使用原始接口的示例 ======
+
+    # 示例4：AI文本处理（原始接口）
+    @listener.listen(message_type="text")
+    async def handle_text_raw(ctx: MessageContext):
+        try:
+            print(f"开始处理AI回复...")
+            # 获取对应的聊天机器人实例
+            chat_bot = chat_manager.get_chat(ctx.chat_id)
             # 使用线程池执行同步的chat调用
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: ''.join(chat_bot.chat(ctx.content, stream=True)))
@@ -251,6 +414,94 @@ if __name__ == "__main__":
             print(f"AI处理消息时发生错误: {e}")
             listener.send_message(ctx.chat_id, f"抱歉，处理消息时发生错误: {e}")
 
+    # 示例5：图片处理（原始接口）
+    @listener.listen(message_type="image")
+    async def handle_image_raw(ctx: MessageContext):
+        try:
+            image_key = json.loads(ctx.content).get("image_key")
+            if not image_key:
+                print("未找到图片key")
+                return
+
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                temp_image_path = Path(temp_file.name)
+            
+            try:
+                # 下载图片
+                if not listener.bot.download_message_resource(ctx.message_id, "image", str(temp_image_path), image_key):
+                    print("图片下载失败")
+                    return
+
+                # 检测并绘制AprilTag
+                detected_image = detector.detect_and_draw(temp_image_path)
+                cv2.imwrite(str(temp_image_path), detected_image)
+                
+                # 重新上传并发送回去
+                new_image_key = listener.bot.upload_image(str(temp_image_path))
+                if new_image_key:
+                    listener.bot.send_image_to_chat(ctx.chat_id, new_image_key)
+                    print("图片已发送回去")
+                else:
+                    print("图片上传失败")
+            finally:
+                # 清理临时文件
+                temp_image_path.unlink(missing_ok=True)
+                
+        except Exception as e:
+            print(f"处理图片消息时发生错误: {str(e)}")
+            import traceback
+            print(f"错误详情:\n{traceback.format_exc()}")
+
+    # 示例6：文件处理（原始接口）
+    @listener.listen(message_type="file")
+    async def handle_file_raw(ctx: MessageContext):
+        try:
+            file_key = json.loads(ctx.content).get("file_key")
+            if not file_key:
+                print("未找到文件key")
+                return
+
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_file_path = Path(temp_file.name)
+            
+            try:
+                # 下载文件
+                if not listener.bot.download_message_resource(ctx.message_id, "file", str(temp_file_path), file_key):
+                    print("文件下载失败")
+                    return
+
+                # 重新上传并发送回去
+                new_file_key = listener.bot.upload_file(str(temp_file_path))
+                if new_file_key:
+                    listener.bot.send_file_to_chat(ctx.chat_id, new_file_key)
+                    print("文件已发送回去")
+                else:
+                    print("文件上传失败")
+            finally:
+                # 清理临时文件
+                temp_file_path.unlink(missing_ok=True)
+                
+        except Exception as e:
+            print(f"处理文件消息时发生错误: {str(e)}")
+            import traceback
+            print(f"错误详情:\n{traceback.format_exc()}")
+
+    # 示例7：富文本消息处理（原始接口）
+    @listener.listen(message_type="post")
+    async def handle_post_raw(ctx: MessageContext):
+        post_content = json.loads(ctx.content)
+        print(f"收到富文本消息: {post_content} (来自{'群组' if ctx.is_group else '私聊'})")
+        
+        # 创建回复的富文本消息
+        post = PostContent(title="回复富文本消息")
+        text_content = post.make_text_content("收到您的富文本消息，这是回复", styles=["bold"])
+        post.add_content_in_new_line(text_content)
+        
+        # 发送富文本消息
+        listener.bot.send_post_to_chat(ctx.chat_id, post.get_content())
+        print("富文本消息已发送回去")
 
     # 启动服务
     listener.run()
