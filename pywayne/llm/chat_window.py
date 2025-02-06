@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QTextEdit,
-                             QLineEdit, QPushButton)
+                             QLineEdit, QPushButton, QHBoxLayout)
 from PyQt5.QtCore import Qt
 from openai import OpenAI
 import sys
@@ -57,6 +57,9 @@ class ChatWindow(QWidget):
         self.window_x = window_x
         self.window_y = window_y
 
+        # 添加停止标志
+        self.is_generating = False
+
         # 初始化UI
         self._init_ui()
 
@@ -81,21 +84,43 @@ class ChatWindow(QWidget):
         # 输入区域
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("在此输入消息...")
-        self.input_field.returnPressed.connect(self._send_message)
+        self.input_field.returnPressed.connect(self._handle_button_click)
         layout.addWidget(self.input_field)
 
-        # 发送按钮
-        send_btn = QPushButton('发送')
-        send_btn.clicked.connect(self._send_message)
-        layout.addWidget(send_btn)
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        
+        # 发送/停止按钮
+        self.action_btn = QPushButton('发送')
+        self.action_btn.clicked.connect(self._handle_button_click)
+        button_layout.addWidget(self.action_btn)
 
+        layout.addLayout(button_layout)
         self.setLayout(layout)
+
+    def _handle_button_click(self):
+        """处理按钮点击事件"""
+        if self.is_generating:
+            self._stop_generation()
+        else:
+            self._send_message()
+
+    def _stop_generation(self):
+        """停止生成回答"""
+        self.is_generating = False
+        self.action_btn.setText('发送')
+        self.input_field.setEnabled(True)
 
     def _send_message(self):
         """处理消息发送"""
         user_input = self.input_field.text()
         if not user_input:
             return
+
+        # 设置生成状态
+        self.is_generating = True
+        self.action_btn.setText('停止')
+        self.input_field.setEnabled(False)
 
         self.messages.append({"role": "user", "content": user_input})
         self.chat_display.append(f"你: {user_input}\n")
@@ -118,8 +143,14 @@ class ChatWindow(QWidget):
 
         # 处理流式响应
         for chunk in response:
+            if not self.is_generating:
+                break
+            
             if chunk.choices[0].delta.content is not None:
                 content = chunk.choices[0].delta.content
+                cursor = self.chat_display.textCursor()
+                cursor.movePosition(cursor.End)
+                self.chat_display.setTextCursor(cursor)
                 self.chat_display.insertPlainText(content)
                 assistant_response.append(content)
                 QApplication.processEvents()
@@ -128,6 +159,11 @@ class ChatWindow(QWidget):
         self.messages.append(
             {"role": "assistant", "content": "".join(assistant_response)}
         )
+
+        # 恢复界面状态
+        self.is_generating = False
+        self.action_btn.setText('发送')
+        self.input_field.setEnabled(True)
 
     def run(self):
         """运行聊天机器人"""
@@ -140,7 +176,7 @@ class ChatWindow(QWidget):
     def launch(cls, base_url: str, api_key: str, system_messages: List[Dict[str, str]] = None, **kwargs):
         """
         快速启动一个聊天窗口
-        
+
         Args:
             base_url: API基础URL
             api_key: API密钥
@@ -158,7 +194,7 @@ class ChatWindow(QWidget):
     def set_system_messages(self, messages: List[Dict[str, str]]):
         """
         设置系统消息
-        
+
         Args:
             messages: 系统消息列表，每个消息是一个包含role和content的字典
         """
@@ -169,7 +205,7 @@ class ChatWindow(QWidget):
     def add_system_message(self, content: str):
         """
         添加单条系统消息
-        
+
         Args:
             content: 系统消息内容
         """
