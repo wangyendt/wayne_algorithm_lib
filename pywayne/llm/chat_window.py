@@ -4,26 +4,29 @@ from PyQt5.QtCore import Qt
 from openai import OpenAI
 import sys
 from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+
+
+@dataclass
+class ChatConfig:
+    base_url: str
+    api_key: str
+    model: str = "deepseek-chat"
+    temperature: float = 0.7
+    max_tokens: int = 2048
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    system_prompt: str = "你是一个严谨的助手"
+    window_title: str = "AI Chat"
+    window_width: int = 600
+    window_height: int = 800
+    window_x: int = 300
+    window_y: int = 300
 
 
 class ChatWindow(QWidget):
-    def __init__(
-            self,
-            base_url: str,
-            api_key: str,
-            model: str = "deepseek-chat",
-            temperature: float = 0.7,
-            max_tokens: int = 2048,
-            top_p: float = 1.0,
-            frequency_penalty: float = 0.0,
-            presence_penalty: float = 0.0,
-            system_prompt: str = "你是一个严谨的助手",
-            window_title: str = "AI Chat",
-            window_width: int = 600,
-            window_height: int = 800,
-            window_x: int = 300,
-            window_y: int = 300
-    ):
+    def __init__(self, config: ChatConfig):
         # 确保QApplication实例存在
         self.app = QApplication.instance()
         if self.app is None:
@@ -33,29 +36,17 @@ class ChatWindow(QWidget):
 
         # 初始化OpenAI客户端
         self.client = OpenAI(
-            api_key=api_key,
-            base_url=base_url
+            api_key=config.api_key,
+            base_url=config.base_url
         )
 
         # 保存配置
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.top_p = top_p
-        self.frequency_penalty = frequency_penalty
-        self.presence_penalty = presence_penalty
+        self.config = config
 
         # 初始化消息历史
         self.messages: List[Dict[str, str]] = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": config.system_prompt}
         ]
-
-        # 窗口配置
-        self.window_title = window_title
-        self.window_width = window_width
-        self.window_height = window_height
-        self.window_x = window_x
-        self.window_y = window_y
 
         # 添加停止标志
         self.is_generating = False
@@ -65,12 +56,12 @@ class ChatWindow(QWidget):
 
     def _init_ui(self):
         """初始化用户界面"""
-        self.setWindowTitle(self.window_title)
+        self.setWindowTitle(self.config.window_title)
         self.setGeometry(
-            self.window_x,
-            self.window_y,
-            self.window_width,
-            self.window_height
+            self.config.window_x,
+            self.config.window_y,
+            self.config.window_width,
+            self.config.window_height
         )
 
         # 主布局
@@ -128,14 +119,14 @@ class ChatWindow(QWidget):
 
         # 创建流式响应
         response = self.client.chat.completions.create(
-            model=self.model,
+            model=self.config.model,
             messages=self.messages,
             stream=True,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            frequency_penalty=self.frequency_penalty,
-            presence_penalty=self.presence_penalty
+            max_tokens=self.config.max_tokens,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            frequency_penalty=self.config.frequency_penalty,
+            presence_penalty=self.config.presence_penalty
         )
 
         self.chat_display.append("AI: ")
@@ -173,19 +164,21 @@ class ChatWindow(QWidget):
             self.app.exec_()
 
     @classmethod
-    def launch(cls, base_url: str, api_key: str, system_messages: List[Dict[str, str]] = None, **kwargs):
+    def launch(cls, base_url: str, api_key: str, model: str = "deepseek-chat", system_messages: List[Dict[str, str]] = None, **kwargs):
         """
         快速启动一个聊天窗口
 
         Args:
             base_url: API基础URL
             api_key: API密钥
+            model: 要使用的模型名称，默认为"deepseek-chat"
             system_messages: 系统消息列表，每个消息是一个包含role和content的字典
                            例如：[{"role": "system", "content": "你是一个Python专家"}]
             **kwargs: 其他传递给ChatWindow的参数
         """
+        config = ChatConfig(base_url=base_url, api_key=api_key, model=model, **kwargs)
         app = QApplication.instance() or QApplication(sys.argv)
-        chat = cls(base_url=base_url, api_key=api_key, **kwargs)
+        chat = cls(config=config)
         if system_messages:
             chat.set_system_messages(system_messages)
         chat.show()
@@ -216,17 +209,21 @@ if __name__ == '__main__':
     # 基础用法
     ChatWindow.launch(
         base_url="https://api.deepseek.com/v1",
-        api_key="your-api-key"
+        api_key="xxx",
+        model="deepseek-chat"  # 可以指定模型
     )
 
     # 高级用法 - 设置系统消息
-    ChatWindow.launch(
+    config = ChatConfig(
         base_url="https://api.deepseek.com/v1",
-        api_key="sk-4556e299ea3b4401b87adcbda3cebb19",
-        system_messages=[
-            {"role": "system", "content": "你是一个Python专家"},
-            {"role": "system", "content": "你的回答要简洁且包含代码示例"}
-        ],
-        window_title="Python助手",
-        temperature=0.8
+        api_key="xxx",
+        model="deepseek-coder",  # 使用不同的模型
+        temperature=0.8,
+        window_title="Python助手"
     )
+    chat = ChatWindow(config)
+    chat.set_system_messages([
+        {"role": "system", "content": "你是一个Python专家"},
+        {"role": "system", "content": "你的回答要简洁且包含代码示例"}
+    ])
+    chat.run()
