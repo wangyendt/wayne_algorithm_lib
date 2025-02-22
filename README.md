@@ -75,7 +75,12 @@ pip install -U pywayne
 
 如果在使用过程中遇到问题，欢迎通过以下方式联系：
 
-- **邮箱**：wang121ye@hotmail.com
+- **邮箱**：
+  - wang121ye@hotmail.com
+  - y-w22@mails.tsinghua.edu.cn
+- **个人网站**：
+  - [http://wangye.xin](http://wangye.xin)
+  - [http://cvllm.com](http://cvllm.com)
 - **LeetCode**：[http://leetcode.com/wangyehope](http://leetcode.com/wangyehope)
 - **GitHub**：[http://github.com/wangyendt](http://github.com/wangyendt)
 

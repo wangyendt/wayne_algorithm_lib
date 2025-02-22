@@ -128,8 +128,8 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
     - wang121ye@hotmail.com
     - y-w22@mails.tsinghua.edu.cn
 - **个人网站**: 
-    - `wangye.xin <https://wangye.xin>`_
-    - `cvllm.com <https://cvllm.com>`_
+    - `wangye.xin <http://wangye.xin>`_
+    - `cvllm.com <http://cvllm.com>`_
 - **LeetCode**: `leetcode.com/wangyehope <https://leetcode.com/wangyehope>`_
 
 
