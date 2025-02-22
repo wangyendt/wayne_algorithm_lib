@@ -117,8 +117,21 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
 
 如果您在使用过程中遇到任何问题，或有任何建议，请通过以下方式联系我们：
 
-- 提交 Issue：https://github.com/wangyendt/wayne_algorithm_lib/issues
+- GitHub Issues：https://github.com/wangyendt/wayne_algorithm_lib/issues
 - 邮件联系：wang121ye@hotmail.com
+
+联系方式与社区
+------------
+
+- **GitHub**: `wangyendt@github.com <https://github.com/wangyendt>`_
+- **邮箱**: 
+    - wang121ye@hotmail.com
+    - y-w22@mails.tsinghua.edu.cn
+- **个人网站**: 
+    - `wangye.xin <https://wangye.xin>`_
+    - `cvllm.com <https://cvllm.com>`_
+- **LeetCode**: `leetcode.com/wangyehope <https://leetcode.com/wangyehope>`_
+
 
 许可证
 ------------
