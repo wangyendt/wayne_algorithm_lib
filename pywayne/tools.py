@@ -491,7 +491,7 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_loc
                 existing_config = yaml.safe_load(f) or {}
             config.update(deep_merge_dicts(existing_config, config))
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
-            yaml.dump(config, f, default_flow_style=False)
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
     if use_lock:
         lock_file = config_yaml_file + ".lock"
