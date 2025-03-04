@@ -28,35 +28,35 @@ class Helper:
             write_yaml_config(self.config_path.name, {})
 
     def get_proj_root(self):
-        return self.project_root.name
+        return str(self.project_root.absolute())
 
     def get_config_path(self):
-        return self.config_path.name
+        return str(self.config_path.absolute())
 
     def set_module_value(self, *keys, value):
-        config_path = self.config_path.name
-        if not self.config_path.exists():
+        config_path = self.config_path.absolute()
+        if not config_path.exists():
             wayne_print(f'Set value failed: config file {config_path} not found, return None', 'yellow')
             return
-        write_yaml_config(config_path, reduce(
+        write_yaml_config(str(config_path), reduce(
             lambda d, k: {k: d},
             reversed(keys),
             value
         ), update=True)
 
     def get_module_value(self, *keys, max_waiting_time: float = 0.0, debug: bool = True):
-        config_path = self.config_path.name
+        config_path = self.config_path.absolute()
         if max_waiting_time > 0.0:
             time_start = time.time()
             while time.time() - time_start <= max_waiting_time:
-                if not self.config_path.exists:
+                if not config_path.exists:
                     if debug:
                         wayne_print(f'waiting for config file {config_path}...', 'yellow')
                     time.sleep(1)
                     continue
 
                 try:
-                    value = reduce(dict.get, keys, read_yaml_config(config_path))
+                    value = reduce(dict.get, keys, read_yaml_config(str(config_path)))
                     if value is not None:
                         return value
                     if debug:
@@ -69,27 +69,28 @@ class Helper:
             wayne_print(f'Timeout: could not read value at {keys=}, return None', 'red', True)
             return None
 
-        if not self.config_path.exists():
+        if not config_path.exists():
             wayne_print(f'Get value failed: config file {config_path} not found, return None', 'yellow')
             return None
 
         try:
-            return reduce(dict.get, keys, read_yaml_config(config_path))
+            return reduce(dict.get, keys, read_yaml_config(str(config_path)))
         except Exception as e:
             wayne_print(f'Get value failed: {e}, return None', 'red', True)
             return None
 
     def delete_module_value(self, *keys):
-        if not self.config_path.exists():
-            wayne_print(f'Delete value failed: config file {self.config_path.name} not found, return', 'yellow')
+        config_path = self.config_path.absolute()
+        if not config_path.exists():
+            wayne_print(f'Delete value failed: config file {config_path} not found, return', 'yellow')
             return
 
         try:
-            config = read_yaml_config(self.config_path.name)
+            config = read_yaml_config(str(config_path))
             parent = reduce(dict.get, keys[:-1], config or {})
             if parent is not None and keys[-1] in parent:
                 del parent[keys[-1]]
-                write_yaml_config(self.config_path.name, config, update=False)
+                write_yaml_config(str(config_path), config, update=False)
 
         except Exception as e:
             wayne_print(f'Delete value failed: {e}', 'red', True)
