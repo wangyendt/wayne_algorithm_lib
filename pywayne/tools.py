@@ -454,7 +454,7 @@ def wayne_print(text: object, color: str = "default", bold: bool = False):
     print(f"{color_code}{bold_code}{text}{end_code}")
 
 
-def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = False):
+def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = False, default_flow_style=False):
     """
     Writes the given configuration dictionary to a YAML file with file lock protection.
 
@@ -462,6 +462,7 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_loc
     :param config: A dictionary containing the configuration settings to write.
     :param update: If True, the function will update the existing YAML file with the new config. If False, the function will overwrite the existing YAML file with the new config.
     :param use_lock: Whether to use file lock protection. Default is True.
+    :param default_flow_style: Whether to use the default flow style for YAML serialization. Default is False.
     """
 
     def deep_merge_dicts(original, updater):
@@ -491,7 +492,7 @@ def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_loc
                 existing_config = yaml.safe_load(f) or {}
             config.update(deep_merge_dicts(existing_config, config))
         with open(config_yaml_file, 'w', encoding='UTF-8') as f:
-            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+            yaml.dump(config, f, default_flow_style=default_flow_style, allow_unicode=True)
 
     if use_lock:
         lock_file = config_yaml_file + ".lock"
