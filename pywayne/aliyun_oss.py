@@ -16,6 +16,7 @@ from natsort import natsorted
 from typing import List, Optional
 from pywayne.tools import wayne_print
 from pathlib import Path
+import shutil
 
 
 class OssManager:
@@ -71,23 +72,33 @@ class OssManager:
             return False
         return True
 
-    def download_file(self, key: str, root_dir: Optional[str] = None) -> bool:
+    def download_file(self, key: str, root_dir: Optional[str] = None, use_basename: bool = False) -> bool:
         """
         下载指定 key 的文件到本地
 
         Args:
             key: OSS 中的键值
             root_dir: 下载文件的根目录，默认为当前目录
+            use_basename: 是否只使用 key 的文件名部分构建本地路径，默认为 False。
+                          如果为 True，则 `a/b/c.txt` 下载到 `root_dir/c.txt`。
+                          如果为 False，则下载到 `root_dir/a/b/c.txt`。
 
         Returns:
             是否下载成功
         """
         try:
             # 确定下载路径
+            key_path = Path(key)
             if root_dir:
-                save_path = Path(root_dir) / key
+                base_save_dir = Path(root_dir)
             else:
-                save_path = Path(key)
+                # 如果 root_dir 未指定，则使用当前目录
+                base_save_dir = Path.cwd()
+
+            if use_basename:
+                save_path = base_save_dir / key_path.name
+            else:
+                save_path = base_save_dir / key_path
 
             # 创建必要的目录
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,13 +111,16 @@ class OssManager:
             self._print_warning(f"下载文件失败：{str(e)}")
             return False
 
-    def download_files_with_prefix(self, prefix: str, root_dir: Optional[str] = None) -> bool:
+    def download_files_with_prefix(self, prefix: str, root_dir: Optional[str] = None, use_basename: bool = False) -> bool:
         """
         下载指定前缀的所有文件到本地
 
         Args:
             prefix: 键值前缀
             root_dir: 下载文件的根目录，默认为当前目录
+            use_basename: 是否只使用 key 的文件名部分构建本地路径，默认为 False。
+                          如果为 True，则 `a/b/c.txt` 下载到 `root_dir/c.txt`。
+                          如果为 False，则下载到 `root_dir/a/b/c.txt`。
 
         Returns:
             是否全部下载成功
@@ -121,7 +135,7 @@ class OssManager:
             # 下载所有文件
             success_count = 0
             for key in keys:
-                if self.download_file(key, root_dir):
+                if self.download_file(key, root_dir, use_basename):
                     success_count += 1
 
             # 检查是否全部下载成功
@@ -336,30 +350,70 @@ class OssManager:
 
         return success
 
-    def download_directory(self, prefix: str, local_path: str) -> bool:
+    def download_directory(self, prefix: str, local_path: str, use_basename: bool = False) -> bool:
         """
         从 OSS 下载整个文件夹
 
         Args:
-            prefix: OSS 中的前缀路径
+            prefix: OSS 中的前缀路径 (e.g., 'data/images/')
             local_path: 下载到本地的目标路径
+            use_basename: 是否只使用每个文件的基本名称保存，默认为 False。
+                          如果为 True，`prefix/sub/file.txt` 会下载到 `local_path/file.txt`。
+                          如果为 False，`a/b/c.txt` (且 prefix 是 `a/b/`) 会下载到 `local_path/a/b/c.txt`。
+                          *注意*: 当 `use_basename` 为 True 时，如果文件夹中存在同名文件，
+                          它们会被下载到同一个 `local_path` 下，可能导致覆盖。
 
         Returns:
             是否全部下载成功
         """
-        # 获取所有匹配的文件
-        keys = self.list_keys_with_prefix(prefix)
-        if not keys:
-            self._print_warning(f"未找到前缀为 '{prefix}' 的文件")
-            return False
+        # 确保 prefix 以 '/' 结尾，以便正确列出文件，除非 prefix 为空
+        normalized_prefix = prefix
+        if normalized_prefix and not normalized_prefix.endswith('/'):
+            normalized_prefix += '/'
 
-        # 创建本地目录
+        # 获取所有匹配的文件 key
+        # 使用 normalized_prefix 进行 list 操作
+        keys = self.list_keys_with_prefix(normalized_prefix, sort=False) # 不需要排序，因为下载顺序不重要
+        if not keys:
+            # 检查 prefix 本身是否存在作为一个对象（可能是个空文件伪装的目录标记）
+            is_prefix_an_object = self.key_exists(prefix) if prefix and not prefix.endswith('/') else False
+
+            if is_prefix_an_object:
+                 # 如果 prefix 本身是个文件，尝试下载它
+                 self._print_info(f"Prefix '{prefix}' is an object (file), attempting to download it.")
+                 # 创建父目录
+                 os.makedirs(local_path, exist_ok=True)
+                 return self.download_file(prefix, local_path, use_basename=use_basename)
+
+            else:
+                # 如果 prefix 对应的 key 列表为空，且 prefix 本身不是文件，则可能是空目录或不存在
+                self._print_warning(f"未找到前缀为 '{normalized_prefix}' 的文件或该前缀是一个空文件夹")
+                # 仍然创建本地目录结构
+                os.makedirs(local_path, exist_ok=True)
+                # 如果 key 列表为空，且 prefix 也不是文件，则认为操作"成功"（没有文件需要下载）
+                return True
+
+
+        # 创建本地目录 (如果 use_basename=True，文件直接放在 local_path)
         os.makedirs(local_path, exist_ok=True)
 
         success = True
         for key in keys:
-            if not self.download_file(key, local_path):
+            # list_keys_with_prefix 可能会返回目录本身 (e.g., 'data/') 如果它是作为一个 key 存在的
+            # download_file 不能下载目录 key，所以跳过
+            if key.endswith('/'):
+                continue
+
+            # 将 use_basename 传递给 download_file, local_path 作为 root_dir
+            if not self.download_file(key, local_path, use_basename=use_basename):
                 success = False
+                self._print_warning(f"下载文件 {key} 失败") # 添加具体文件失败信息
+
+        if success:
+             self._print_info(f"成功下载目录 {prefix} 到 {local_path}" + (" (使用 basename)" if use_basename else ""))
+        else:
+             self._print_warning(f"下载目录 {prefix} 到 {local_path} 时部分文件失败")
+
 
         return success
 
@@ -570,8 +624,6 @@ class OssManager:
 
 
 if __name__ == '__main__':
-    import shutil
-
     # 初始化 OSS 管理器
     manager = OssManager(
         endpoint="xxx",
@@ -780,11 +832,119 @@ if __name__ == '__main__':
             wayne_print("\n--- 新增方法测试结束 --- ", "blue")
         # --- 新增测试用例 End ---
 
+        # --- 新增 Download Basename 测试 Start ---
+        # 17. 测试 download_file (use_basename=True)
+        wayne_print("\n17. 测试 download_file (use_basename=True)", "cyan")
+        download_basename_test_key = "basename/test/download_basename.txt"
+        download_basename_local_dir = "downloads_basename_file"
+        download_basename_local_file = os.path.join(download_basename_local_dir, "download_basename.txt")
+        # 先上传一个带路径的文件
+        if manager.upload_text(download_basename_test_key, "Basename test content"):
+            wayne_print(f"尝试下载 {download_basename_test_key} 到 {download_basename_local_dir} (use_basename=True):", "magenta")
+            if manager.download_file(download_basename_test_key, download_basename_local_dir, use_basename=True):
+                wayne_print(f"验证文件是否存在于: {download_basename_local_file}", "magenta")
+                if os.path.exists(download_basename_local_file):
+                    wayne_print("  - 存在", "magenta")
+                    # 可以在这里添加内容验证
+                    try:
+                        with open(download_basename_local_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            wayne_print(f"  - 内容: {content}", "magenta")
+                    except Exception as e:
+                         wayne_print(f"  - 读取内容失败: {e}", "yellow")
+                else:
+                    wayne_print("  - 不存在", "red")
+            # 清理本地文件夹 (download_file 会创建父目录)
+            shutil.rmtree(download_basename_local_dir, ignore_errors=True)
+             # 确保清理干净，即使只有文件存在
+            if os.path.exists(download_basename_local_file):
+                os.remove(download_basename_local_file)
+            # 清理 OSS 文件
+            manager.delete_file(download_basename_test_key)
+        else:
+            wayne_print(f"上传 {download_basename_test_key} 失败，跳过 basename 下载测试", "red")
+
+
+        # 18. 测试 download_files_with_prefix (use_basename=True)
+        wayne_print("\n18. 测试 download_files_with_prefix (use_basename=True)", "cyan")
+        prefix_basename_test_prefix = "basename_prefix/"
+        prefix_basename_keys = [prefix_basename_test_prefix + "file1.txt", prefix_basename_test_prefix + "sub/file2.txt"]
+        prefix_basename_local_dir = "downloads_basename_prefix"
+        expected_files = [os.path.join(prefix_basename_local_dir, "file1.txt"), os.path.join(prefix_basename_local_dir, "file2.txt")]
+        # 上传测试文件
+        upload_success_prefix = all(manager.upload_text(key, f"Content for {key}") for key in prefix_basename_keys)
+        if upload_success_prefix:
+            wayne_print(f"尝试下载前缀 {prefix_basename_test_prefix} 到 {prefix_basename_local_dir} (use_basename=True):", "magenta")
+            if manager.download_files_with_prefix(prefix_basename_test_prefix, prefix_basename_local_dir, use_basename=True):
+                 wayne_print(f"验证文件是否存在于 {prefix_basename_local_dir}:", "magenta")
+                 all_exist = True
+                 for fpath in expected_files:
+                     if os.path.exists(fpath):
+                         wayne_print(f"  - {os.path.basename(fpath)}: 存在", "magenta")
+                     else:
+                         wayne_print(f"  - {os.path.basename(fpath)}: 不存在", "red")
+                         all_exist = False
+                 if not all_exist:
+                      wayne_print("部分文件未按预期 (basename) 下载", "red")
+            # 清理本地文件
+            shutil.rmtree(prefix_basename_local_dir, ignore_errors=True)
+            # 清理 OSS 文件
+            manager.delete_files_with_prefix(prefix_basename_test_prefix)
+        else:
+            wayne_print(f"上传前缀 {prefix_basename_test_prefix} 文件失败，跳过 basename prefix 下载测试", "red")
+
+
+        # 19. 测试 download_directory (use_basename=True)
+        wayne_print("\n19. 测试 download_directory (use_basename=True)", "cyan")
+        dir_basename_test_prefix = "basename_dir/"
+        dir_basename_keys = [dir_basename_test_prefix + "root_file.txt", dir_basename_test_prefix + "sub_dir/nested_file.txt"]
+        dir_basename_local_dir = "downloads_basename_dir"
+        dir_expected_files = [os.path.join(dir_basename_local_dir, "root_file.txt"), os.path.join(dir_basename_local_dir, "nested_file.txt")]
+        # 上传测试文件
+        upload_success_dir = all(manager.upload_text(key, f"Content for {key}") for key in dir_basename_keys)
+        if upload_success_dir:
+            wayne_print(f"尝试下载目录 {dir_basename_test_prefix} 到 {dir_basename_local_dir} (use_basename=True):", "magenta")
+            if manager.download_directory(dir_basename_test_prefix, dir_basename_local_dir, use_basename=True):
+                wayne_print(f"验证文件是否存在于 {dir_basename_local_dir}:", "magenta")
+                dir_all_exist = True
+                for fpath in dir_expected_files:
+                     if os.path.exists(fpath):
+                         wayne_print(f"  - {os.path.basename(fpath)}: 存在", "magenta")
+                     else:
+                         wayne_print(f"  - {os.path.basename(fpath)}: 不存在", "red")
+                         dir_all_exist = False
+                if not dir_all_exist:
+                    wayne_print("部分文件未按预期 (basename) 下载", "red")
+
+            # 清理本地文件
+            shutil.rmtree(dir_basename_local_dir, ignore_errors=True)
+            # 清理 OSS 文件
+            manager.delete_files_with_prefix(dir_basename_test_prefix)
+        else:
+            wayne_print(f"上传目录 {dir_basename_test_prefix} 文件失败，跳过 basename dir 下载测试", "red")
+        # --- 新增 Download Basename 测试 End ---
+
     finally:
-        # 清理测试文件
+        # 清理本地临时文件
         if os.path.exists(test_file_path):
             os.remove(test_file_path)
         if os.path.exists(test_dir_path):
             shutil.rmtree(test_dir_path)
         if os.path.exists("downloads"):
             shutil.rmtree("downloads")
+        # --- 新增清理 Start ---
+        if os.path.exists(download_basename_local_dir):
+             shutil.rmtree(download_basename_local_dir, ignore_errors=True)
+        # 确保 download_file 的 basename 文件也被删除（如果目录删除失败）
+        if os.path.exists(download_basename_local_file):
+            try:
+                os.remove(download_basename_local_file)
+            except OSError:
+                pass # Ignore error if it's already gone or part of the dir
+        if os.path.exists(prefix_basename_local_dir):
+             shutil.rmtree(prefix_basename_local_dir, ignore_errors=True)
+        if os.path.exists(dir_basename_local_dir):
+             shutil.rmtree(dir_basename_local_dir, ignore_errors=True)
+        # --- 新增清理 End ---
+        wayne_print("\n--- 新增方法测试结束 --- ", "blue")
+    # --- 新增测试用例 End ---
