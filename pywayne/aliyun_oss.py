@@ -442,6 +442,132 @@ class OssManager:
             self._print_warning(f"读取文件失败：{str(e)}")
             return None
 
+    def key_exists(self, key: str) -> bool:
+        """
+        检查指定的 key 是否存在于 OSS bucket 中
+
+        Args:
+            key: 要检查的 OSS 键值
+
+        Returns:
+            如果 key 存在则返回 True，否则返回 False
+        """
+        try:
+            exists = self.bucket.object_exists(key)
+            if exists:
+                self._print_info(f"Key '{key}' 存在")
+            else:
+                self._print_info(f"Key '{key}' 不存在")
+            return exists
+        except Exception as e:
+            self._print_warning(f"检查 key '{key}' 是否存在时出错：{str(e)}")
+            return False
+
+    def get_file_metadata(self, key: str) -> Optional[dict]:
+        """
+        获取指定 key 文件的元数据
+
+        Args:
+            key: OSS 中的键值
+
+        Returns:
+            包含元数据（如 content_length, last_modified, etag, content_type 等）的字典，
+            如果文件不存在或发生错误则返回 None
+        """
+        try:
+            meta = self.bucket.get_object_meta(key)
+            metadata = {
+                'content_length': meta.content_length,
+                'last_modified': meta.last_modified,
+                'etag': meta.etag,
+                'content_type': meta.headers.get('Content-Type'),
+                # 可以根据需要添加更多元数据字段
+                # 'request_id': meta.request_id,
+                # 'server_crc': meta.server_crc,
+                # 'content_md5': meta.content_md5,
+                # 'headers': meta.headers, # 原始 HTTP 头部
+            }
+            self._print_info(f"成功获取文件 '{key}' 的元数据")
+            return metadata
+        except oss2.exceptions.NoSuchKey:
+            self._print_warning(f"获取元数据失败：文件 '{key}' 不存在")
+            return None
+        except Exception as e:
+            self._print_warning(f"获取文件 '{key}' 元数据时出错：{str(e)}")
+            return None
+
+    def copy_object(self, source_key: str, target_key: str) -> bool:
+        """
+        在同一个 bucket 内复制对象
+
+        Args:
+            source_key: 源对象的键值
+            target_key: 目标对象的键值
+
+        Returns:
+            是否复制成功
+        """
+        if not self._check_write_permission():
+            return False
+
+        try:
+            # 检查源文件是否存在
+            if not self.key_exists(source_key):
+                self._print_warning(f"复制失败：源文件 '{source_key}' 不存在")
+                return False
+                
+            result = self.bucket.copy_object(self.bucket_name, source_key, target_key)
+            # 检查复制操作的 HTTP 状态码
+            if 200 <= result.status < 300:
+                self._print_info(f"成功将 '{source_key}' 复制到 '{target_key}'")
+                return True
+            else:
+                self._print_warning(f"复制文件失败：从 '{source_key}' 到 '{target_key}'，状态码: {result.status}")
+                return False
+        except Exception as e:
+            self._print_warning(f"复制文件时出错：从 '{source_key}' 到 '{target_key}' - {str(e)}")
+            return False
+
+    def move_object(self, source_key: str, target_key: str) -> bool:
+        """
+        在同一个 bucket 内移动/重命名对象（通过复制后删除实现）
+
+        Args:
+            source_key: 源对象的键值
+            target_key: 目标对象的键值
+
+        Returns:
+            是否移动成功
+        """
+        if not self._check_write_permission():
+             return False
+
+        try:
+            # 检查源文件是否存在
+            if not self.key_exists(source_key):
+                self._print_warning(f"移动失败：源文件 '{source_key}' 不存在")
+                return False
+
+            # 复制对象
+            copy_success = self.copy_object(source_key, target_key)
+
+            if copy_success:
+                # 删除源对象
+                delete_success = self.delete_file(source_key)
+                if delete_success:
+                    self._print_info(f"成功将 '{source_key}' 移动到 '{target_key}'")
+                    return True
+                else:
+                    self._print_warning(f"移动文件 '{source_key}' 时删除源文件失败，目标文件 '{target_key}' 可能已创建")
+                    # Consider attempting to delete the copied target_key for atomicity? Maybe not.
+                    return False
+            else:
+                self._print_warning(f"移动文件失败：无法将 '{source_key}' 复制到 '{target_key}'")
+                return False
+        except Exception as e:
+            self._print_warning(f"移动文件时出错：从 '{source_key}' 到 '{target_key}' - {str(e)}")
+            return False
+
 
 if __name__ == '__main__':
     import shutil
@@ -563,6 +689,96 @@ if __name__ == '__main__':
         manager.delete_files_with_prefix("1/")
         manager.delete_files_with_prefix("2/")
         manager.delete_files_with_prefix("test_dir/")
+
+        # --- 新增测试用例 Start ---
+        try:
+            # 准备测试文件
+            wayne_print("\n--- 开始新增方法测试 --- ", "blue")
+            test_source_file = "source_test.txt"
+            test_target_file = "target_test.txt"
+            test_move_source = "move_source.txt"
+            test_move_target = "move_target.txt"
+            test_content = "This is a test file for copy/move operations."
+
+            with open(test_source_file, "w", encoding="utf-8") as f:
+                f.write(test_content)
+            with open(test_move_source, "w", encoding="utf-8") as f:
+                f.write("This is a test file for move operation.")
+
+            # 先上传一个基础文件用于测试 key_exists 和 get_metadata
+            base_test_key = "base_test_file.txt"
+            if manager.upload_file(base_test_key, test_source_file):
+
+                # 13. 测试 key_exists
+                wayne_print("\n13. 测试 key_exists", "cyan")
+                wayne_print(f"检查存在的 key '{base_test_key}':", "magenta")
+                manager.key_exists(base_test_key)
+                wayne_print(f"检查不存在的 key 'nonexistent_key.txt':", "magenta")
+                manager.key_exists("nonexistent_key.txt")
+
+                # 14. 测试 get_file_metadata
+                wayne_print("\n14. 测试 get_file_metadata", "cyan")
+                wayne_print(f"获取 '{base_test_key}' 的元数据:", "magenta")
+                metadata = manager.get_file_metadata(base_test_key)
+                if metadata:
+                    for k, v in metadata.items():
+                        wayne_print(f"  - {k}: {v}", "magenta")
+                wayne_print(f"尝试获取不存在文件 'nonexistent_key.txt' 的元数据:", "magenta")
+                manager.get_file_metadata("nonexistent_key.txt")
+
+            else:
+                wayne_print("基础文件上传失败，跳过部分新测试", "red")
+
+            # 15. 测试 copy_object
+            wayne_print("\n15. 测试 copy_object", "cyan")
+            # 先上传源文件
+            if manager.upload_file(test_source_file, test_source_file):
+                wayne_print(f"尝试复制 '{test_source_file}' 到 '{test_target_file}':", "magenta")
+                if manager.copy_object(test_source_file, test_target_file):
+                    wayne_print(f"验证目标文件 '{test_target_file}' 是否存在:", "magenta")
+                    manager.key_exists(test_target_file)
+                    # 清理复制的文件
+                    manager.delete_file(test_target_file)
+                # 清理源文件
+                manager.delete_file(test_source_file)
+            else:
+                 wayne_print(f"上传源文件 {test_source_file} 失败，跳过 copy 测试", "red")
+            # 测试复制不存在的文件
+            wayne_print(f"尝试复制不存在的文件 'nonexistent_source.txt':", "magenta")
+            manager.copy_object("nonexistent_source.txt", "some_target.txt")
+
+            # 16. 测试 move_object
+            wayne_print("\n16. 测试 move_object", "cyan")
+            # 先上传源文件
+            if manager.upload_file(test_move_source, test_move_source):
+                wayne_print(f"尝试移动 '{test_move_source}' 到 '{test_move_target}':", "magenta")
+                if manager.move_object(test_move_source, test_move_target):
+                    wayne_print(f"验证目标文件 '{test_move_target}' 是否存在:", "magenta")
+                    manager.key_exists(test_move_target)
+                    wayne_print(f"验证源文件 '{test_move_source}' 是否已被删除:", "magenta")
+                    manager.key_exists(test_move_source)
+                    # 清理移动后的文件
+                    manager.delete_file(test_move_target)
+                else:
+                    # 如果移动失败，可能源文件还在，尝试删除
+                    manager.delete_file(test_move_source)
+            else:
+                wayne_print(f"上传源文件 {test_move_source} 失败，跳过 move 测试", "red")
+            # 测试移动不存在的文件
+            wayne_print(f"尝试移动不存在的文件 'nonexistent_move_source.txt':", "magenta")
+            manager.move_object("nonexistent_move_source.txt", "some_move_target.txt")
+
+            # 最终清理基础测试文件
+            manager.delete_file(base_test_key)
+
+        finally:
+            # 清理本地临时文件
+            if os.path.exists(test_source_file):
+                os.remove(test_source_file)
+            if os.path.exists(test_move_source):
+                os.remove(test_move_source)
+            wayne_print("\n--- 新增方法测试结束 --- ", "blue")
+        # --- 新增测试用例 End ---
 
     finally:
         # 清理测试文件
