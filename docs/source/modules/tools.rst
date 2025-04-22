@@ -224,7 +224,7 @@ gettool 是一个命令行工具，用于快速获取和管理 C++ 工具库中�
       wayne_print("操作成功", color="green", bold=True)
 
 配置文件操作
------------
+-----------------
 
 1. .. py:function:: write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = False)
 

@@ -160,20 +160,24 @@ text_to_speech_output_mp3
 1. ffmpeg 相关问题：
 
    Q: 提示找不到 ffmpeg 命令怎么办？
+   
    A: 请根据您的操作系统安装 ffmpeg：
       - macOS：使用 ``brew install ffmpeg``
       - Linux：使用 ``sudo apt install ffmpeg`` 或对应的包管理器命令
       - Windows：从官网下载并添加到系统 PATH
 
    Q: ffmpeg 转换时报错怎么处理？
+   
    A: 检查输出目录是否有写入权限，确保输入文件存在且格式正确。
 
 2. 语音服务问题：
 
    Q: macOS 的 say 命令无法使用？
+   
    A: 检查系统音频服务是否正常，或尝试将 use_say 参数设置为 False 以使用 gTTS。
 
    Q: gTTS 服务无法访问？
+   
    A: 检查网络连接，必要时配置代理。如果问题持续，可以尝试使用本地 TTS 引擎。
 
 3. 音频质量问题：

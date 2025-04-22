@@ -121,7 +121,7 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
 - 邮件联系：wang121ye@hotmail.com
 
 联系方式与社区
-------------
+----------------
 
 - **GitHub**: `wangyendt@github.com <https://github.com/wangyendt>`_
 - **邮箱**: 

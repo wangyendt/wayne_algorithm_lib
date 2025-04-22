@@ -19,6 +19,7 @@ OssManager 类详细说明
    - 删除指定文件或根据前缀删除多个文件。
    - 上传和下载整个目录。
    - 读取 OSS 上存储文件的内容。
+   - 检查文件是否存在，获取文件元数据，复制和移动文件等高级操作。
 
    **方法**:
 
@@ -46,17 +47,31 @@ OssManager 类详细说明
      
      检查当前 OSS 账号是否具备写权限，返回布尔值。
 
-   - download_file(self, key: str, root_dir: Optional[str]=None) -> bool
+   - download_file(self, key: str, root_dir: Optional[str]=None, use_basename: bool = False) -> bool
      
      下载 OSS 中指定 key 的文件，并存储到 root_dir 目录中（如果指定）。
+     
+     **参数**:
+     
+     - **key**: OSS 中的键值
+     - **root_dir**: 下载文件的根目录，默认为当前目录
+     - **use_basename**: 是否只使用 key 的文件名部分构建本地路径，默认为 False。
+       如果为 True，则 `a/b/c.txt` 下载到 `root_dir/c.txt`；
+       如果为 False，则下载到 `root_dir/a/b/c.txt`。
      
      **返回**:
      
      - 布尔值，指示是否成功下载。
 
-   - download_files_with_prefix(self, prefix: str, root_dir: Optional[str]=None) -> bool
+   - download_files_with_prefix(self, prefix: str, root_dir: Optional[str]=None, use_basename: bool = False) -> bool
      
      下载 OSS 中所有以指定前缀开头的文件，存储到指定目录中。
+     
+     **参数**:
+     
+     - **prefix**: 键值前缀
+     - **root_dir**: 下载文件的根目录，默认为当前目录
+     - **use_basename**: 是否只使用 key 的文件名部分构建本地路径，与 download_file 相同
 
    - list_all_keys(self, sort: bool=True) -> List[str]
      
@@ -94,9 +109,15 @@ OssManager 类详细说明
      
      将本地目录上传到 OSS，所有文件存储时会以 prefix 作为路径前缀。
      
-   - download_directory(self, prefix: str, local_path: str) -> bool
+   - download_directory(self, prefix: str, local_path: str, use_basename: bool = False) -> bool
      
      下载 OSS 中指定前缀的所有文件，并存储到本地目录中。
+     
+     **参数**:
+     
+     - **prefix**: 键值前缀
+     - **local_path**: 下载文件的本地目录
+     - **use_basename**: 是否只使用 key 的文件名部分构建本地路径，与 download_file 相同
 
    - list_directory_contents(self, prefix: str, sort: bool=True) -> List[tuple[str, bool]]
      
@@ -105,6 +126,56 @@ OssManager 类详细说明
    - read_file_content(self, key: str) -> Optional[str]
      
      读取 OSS 上存储的文件内容，并返回字符串形式的内容。
+   
+   - key_exists(self, key: str) -> bool
+     
+     检查指定的键值是否存在于 OSS 中。
+     
+     **参数**:
+     
+     - **key**: 要检查的 OSS 键值
+     
+     **返回**:
+     
+     - 布尔值，表示键值是否存在
+
+   - get_file_metadata(self, key: str) -> Optional[dict]
+     
+     获取 OSS 中指定文件的元数据信息。
+     
+     **参数**:
+     
+     - **key**: OSS 中的键值
+     
+     **返回**:
+     
+     - 包含元数据信息的字典，如不存在则返回 None
+
+   - copy_object(self, source_key: str, target_key: str) -> bool
+     
+     在 OSS 中复制文件。
+     
+     **参数**:
+     
+     - **source_key**: 源文件的键值
+     - **target_key**: 目标文件的键值
+     
+     **返回**:
+     
+     - 布尔值，表示复制操作是否成功
+
+   - move_object(self, source_key: str, target_key: str) -> bool
+     
+     在 OSS 中移动文件（复制后删除源文件）。
+     
+     **参数**:
+     
+     - **source_key**: 源文件的键值
+     - **target_key**: 目标文件的键值
+     
+     **返回**:
+     
+     - 布尔值，表示移动操作是否成功
 
 使用示例
 ----------
@@ -134,6 +205,20 @@ OssManager 类详细说明
    # 读取 OSS 上文件的内容
    content = oss.read_file_content(key="data/sample.txt")
    print("文件内容：", content)
+   
+   # 检查文件是否存在
+   if oss.key_exists("data/sample.txt"):
+       print("文件存在")
+       
+   # 获取文件元数据
+   metadata = oss.get_file_metadata("data/sample.txt")
+   print("文件大小：", metadata.get("size"), "字节")
+   
+   # 复制文件
+   oss.copy_object("data/sample.txt", "backup/sample.txt")
+   
+   # 移动文件
+   oss.move_object("data/temp.txt", "archive/temp.txt")
 
 模块扩展建议
 --------------

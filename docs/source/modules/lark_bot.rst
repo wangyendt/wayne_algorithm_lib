@@ -95,15 +95,13 @@ LarkBot 类为与飞书平台进行交互的核心类，提供了发送各种消
   - ``send_text_to_chat(chat_id, text)``：向群聊发送文本消息。
 
 - **发送图像消息**：
-  - ``send_image_to_user(user_open_id, image_key)`` 和 ``send_image_to_chat(chat_id, image_key)``
-    用于发送图像消息。
+  - ``send_image_to_user(user_open_id, image_key)`` 和 ``send_image_to_chat(chat_id, image_key)``：用于发送图像消息。
 
 - **发送音频与多媒体消息**：
   - 对应接口支持发送音频消息（如 ``send_audio_to_user`` / ``send_audio_to_chat``）以及其他多媒体消息（如 ``send_media_to_user`` / ``send_media_to_chat``）。
 
 - **发送文件**：
-  - ``send_file_to_user(user_open_id, file_key)`` 和 ``send_file_to_chat(chat_id, file_key)``
-    用于文件消息发送。
+  - ``send_file_to_user(user_open_id, file_key)`` 和 ``send_file_to_chat(chat_id, file_key)``：用于文件消息发送。
 
 - **发送交互消息及分享消息**：
   - 包括发送交互式消息（``send_interactive_to_user`` / ``send_interactive_to_chat``）和分享聊天、分享用户信息的接口。
@@ -111,16 +109,21 @@ LarkBot 类为与飞书平台进行交互的核心类，提供了发送各种消
 - **用户和群组信息查询**：
   - 包含获取用户信息 (``get_user_info``)、查询群组列表 (``get_group_list``)、通过群名称查找群聊 ID (``get_group_chat_id_by_name``) 和获取群成员信息 (``get_members_in_group_by_group_chat_id``) 等功能。
 
-**示例**::
+下面是使用 LarkBot 类的示例：
 
-   >>> from pywayne.lark_bot import LarkBot, TextContent
-   >>> # 初始化 LarkBot 实例
-   >>> bot = LarkBot(app_id="your_app_id", app_secret="your_app_secret")
-   >>> # 使用 TextContent 构造加粗文本消息
-   >>> text_msg = TextContent.make_bold_pattern("Hello, 飞书!")
-   >>> # 发送消息到指定用户
-   >>> response = bot.send_text_to_user(user_open_id="user_open_id_example", text=text_msg)
-   >>> print(response)
+.. code-block:: python
+
+   from pywayne.lark_bot import LarkBot, TextContent
+   
+   # 初始化 LarkBot 实例
+   bot = LarkBot(app_id="your_app_id", app_secret="your_app_secret")
+   
+   # 使用 TextContent 构造加粗文本消息
+   text_msg = TextContent.make_bold_pattern("Hello, 飞书!")
+   
+   # 发送消息到指定用户
+   response = bot.send_text_to_user(user_open_id="user_open_id_example", text=text_msg)
+   print(response)
 
 通过这些接口，用户可以方便地构造并发送各类消息，实现与飞书平台的高效互动。
 
@@ -129,6 +132,7 @@ LarkBotListener 类
 ------------------
 
 .. py:class:: LarkBotListener(app_id: str, app_secret: str, message_expiry_time: int = 60)
+   :noindex:
 
    飞书消息监听器，用于实时接收和处理飞书消息。支持文本、图片、文件等多种消息类型，并提供消息去重和异步处理功能。
 
@@ -194,7 +198,9 @@ LarkBotListener 类
      
      启动消息监听服务。
 
-**使用示例**::
+下面是使用 LarkBotListener 类的示例：
+
+.. code-block:: python
 
    from pywayne.lark_bot_listener import LarkBotListener
    
@@ -282,15 +288,17 @@ LarkBotListener 类
   - ``send_shared_chat_to_user``、``send_shared_chat_to_chat``：发送聊天分享消息。
   - ``send_shared_user_to_user``、``send_shared_user_to_chat``：发送用户分享消息。
 
-**示例**::
+下面是一个使用高级功能的例子：
 
-   >>> # 获取并打印当前账号的群组列表
-   >>> groups = bot.get_group_list()
-   >>> print("当前群组：", groups)
-   >>>
-   >>> # 根据群名称获取对应的群聊 ID
-   >>> chat_ids = bot.get_group_chat_id_by_name("项目讨论组")
-   >>> print("项目讨论组的群聊 ID：", chat_ids) 
+.. code-block:: python
+
+   # 获取并打印当前账号的群组列表
+   groups = bot.get_group_list()
+   print("当前群组：", groups)
+   
+   # 根据群名称获取对应的群聊 ID
+   chat_ids = bot.get_group_chat_id_by_name("项目讨论组")
+   print("项目讨论组的群聊 ID：", chat_ids)
 
 注意事项与最佳实践
 ----------------------
