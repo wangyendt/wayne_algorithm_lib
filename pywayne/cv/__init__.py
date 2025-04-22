@@ -10,5 +10,6 @@
 
 __all__ = [
     'apriltag_detector',
-    'geometric_hull_calculator'
+    'geometric_hull_calculator',
+    'tools',
 ]
