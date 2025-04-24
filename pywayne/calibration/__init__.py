@@ -6,3 +6,9 @@
 # site:  wangyendt@github.com
 # software: PyCharm
 # code is far away from bugs.
+
+
+__all__ = [
+    'magnetometer_calibration',
+    'temporal_calibration',
+]

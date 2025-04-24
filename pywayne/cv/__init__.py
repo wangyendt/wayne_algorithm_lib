@@ -10,6 +10,8 @@
 
 __all__ = [
     'apriltag_detector',
+    'camera_model',
     'geometric_hull_calculator',
+    'stereo_tag_matcher',
     'tools',
 ]

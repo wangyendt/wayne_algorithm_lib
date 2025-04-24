@@ -9,5 +9,5 @@
 
 
 __all__ = [
-    'logcat_reader'
+    'logcat_reader',
 ]

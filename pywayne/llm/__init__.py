@@ -1,5 +1,6 @@
 
 __all__ = [
 	'chat_bot',
-	'chat_window'
+    'chat_ollama_gradio',
+	'chat_window',
 ]
