@@ -1,7 +1,14 @@
 校准工具 (calibration)
 ========================
 
-本模块提供了用于传感器校准的工具函数与类，主要针对磁力计校准问题。通过利用加速度计、陀螺仪和磁力计的数据，模块旨在帮助用户计算并校正传感器的软铁（soft-iron）效应和硬铁（hard-iron）偏差。
+本模块提供了用于传感器校准的工具函数与类，包括磁力计校准和时空校准（预留）。
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Calibration Submodules:
+
+   calibration/magnetometer_calibration
+   calibration/temporal_calibration
 
 MagnetometerCalibrator 类
 ---------------------------

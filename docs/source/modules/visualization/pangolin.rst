@@ -1,18 +1,12 @@
-视觉化工具 (visualization)
-===========================
+Pangolin 查看器 (pangolin)
+============================
 
-本模块主要用于 3D 数据的可视化展示，集成了 Pangolin 查看器。
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Visualization Submodules:
-
-   visualization/pangolin
-
-PangolinViewer 类
-------------------
+.. automodule:: pywayne.visualization.pangolin
+   :members:
+   :undoc-members:
 
 .. py:class:: PangolinViewer(width: int, height: int, run_on_start: bool = False)
+   :noindex:
 
    PangolinViewer 类封装了 Pangolin 查看器，在 3D 环境中提供高效实时的数据展示功能。用户可以通过此类初始化一个 3D 可视化窗口，并发布轨迹、点云、图像等数据。
    
