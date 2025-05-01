@@ -81,11 +81,10 @@ class StereoTagMatcher:
             show (bool): If True, display the resulting stitched image.
 
         Returns:
-            tuple: (matched_tags_info, stitched_image_annotated)
-                   
-                   matched_tags_info (dict): {tag_id: {'cam1_center': (x,y), 'cam1_corners': [...],
-                                                        'cam2_center': (x,y), 'cam2_corners': [...]}, ...}
-                   stitched_image_annotated (np.ndarray): The annotated stitched image, or None if error.
+            tuple: A tuple `(matched_tags_info, stitched_image)` where `matched_tags_info`
+                   is a dictionary of matched tag details and `stitched_image` is the
+                   annotated numpy array image (or None on error).
+
         """
         if self.detector is None:
             print("Error: Detector not initialized.")

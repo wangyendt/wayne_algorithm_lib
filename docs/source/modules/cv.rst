@@ -8,6 +8,7 @@
    :caption: CV 子模块:
 
    cv/apriltag_detector
+   cv/camera_model
    cv/geometric_hull_calculator
    cv/stereo_tag_matcher
    cv/tools 
