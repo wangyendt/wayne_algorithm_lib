@@ -33,6 +33,7 @@ Pangolin 查看器 (pangolin)
      - `init()`: 初始化视图（如设置初始视角）。
      - `show(delay_time_in_s)`: 刷新视图并处理事件。
      - `should_not_quit()`: 检查查看器是否应继续运行。
+     - `clear_all_visual_elements()`: 清除所有已添加的可视元素（点、线、轨迹、相机、平面等）。
    - **点云 API**:
      - `clear_all_points()`
      - `add_points(points, color, label, point_size)`

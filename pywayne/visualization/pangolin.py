@@ -86,6 +86,9 @@ class PangolinViewer:
 
     # --- Re-adding New API Wrappers --- 
 
+    def clear_all_visual_elements(self):
+        self.viewer.clear_all_visual_elements()
+
     # Point Cloud API
     def clear_all_points(self):
         self.viewer.clear_all_points()
@@ -330,11 +333,12 @@ if __name__ == '__main__':
         # 注意：如果设置了主相机，publish_traj仍然会画出绿色相机，但视图不再跟随它
         
         # 2. 清除上一帧的额外轨迹、独立相机、点云、平面和直线
-        viewer.clear_all_trajectories()
-        viewer.clear_all_cameras()
-        viewer.clear_all_points()
-        viewer.clear_all_planes()
-        viewer.clear_all_lines()
+        # viewer.clear_all_trajectories()
+        # viewer.clear_all_cameras()
+        # viewer.clear_all_points()
+        # viewer.clear_all_planes()
+        # viewer.clear_all_lines()
+        viewer.clear_all_visual_elements()
         
         # 3. 添加额外的轨迹 (使用新API)
         # 只显示螺旋线的一部分，模拟动态增长
