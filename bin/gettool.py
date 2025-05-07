@@ -17,17 +17,26 @@ from pywayne.tools import wayne_print, read_yaml_config, write_yaml_config
 
 
 def sparse_clone(url: str, target_dir: str):
-    result = subprocess.run(f'git clone --sparse {url} {target_dir}', shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        result = subprocess.run(f'git clone --no-checkout {url} {target_dir}', shell=True, capture_output=True, text=True)
-        if result.returncode == 0:
+    wayne_print(f"Attempting to clone repository from {url} to {target_dir} with --sparse option...", "cyan")
+    result_sparse = subprocess.run(f'git clone --sparse --progress {url} "{target_dir}"', shell=True, text=True)
+    if result_sparse.returncode != 0:
+        wayne_print(f'Sparse clone failed. Attempting clone with --no-checkout for manual sparse-checkout init..._OUTPUT', 'yellow')
+        result_no_checkout = subprocess.run(f'git clone --no-checkout --progress {url} "{target_dir}"', shell=True, text=True)
+        if result_no_checkout.returncode == 0:
             cwd = os.getcwd()
-            os.chdir(target_dir)
-            subprocess.run('git sparse-checkout init --cone', shell=True, capture_output=True, text=True)
-            os.chdir(cwd)
-            wayne_print(f'Cloned repository from {url} to {target_dir} with sparse-checkout initialized.', 'yellow')
+            try:
+                os.chdir(target_dir)
+                wayne_print(f'Initializing sparse-checkout in {target_dir}..._OUTPUT', 'cyan')
+                init_result = subprocess.run('git sparse-checkout init --cone', shell=True, text=True, capture_output=True)
+                if init_result.returncode == 0:
+                    wayne_print(f'Cloned repository from {url} to {target_dir} with sparse-checkout initialized.', 'yellow')
+                else:
+                    wayne_print(f'Failed to initialize sparse-checkout in {target_dir}. Error: {init_result.stderr}', 'red')
+                    # exit(0) # Consider if failure here is critical enough to exit
+            finally:
+                os.chdir(cwd)
         else:
-            wayne_print(f'Failed to clone repository from {url} to {target_dir}.', 'red')
+            wayne_print(f'Failed to clone repository from {url} to {target_dir} even with --no-checkout.', 'red')
             exit(0)
     else:
         wayne_print(f'Successfully cloned repository from {url} to {target_dir} with --sparse option.', 'green')
@@ -53,7 +62,15 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
         else:
             tool_is_submodule = False
         if tool_is_submodule:
-            subprocess.run(["git", "submodule", "update", "--init", "--recursive", tool_path])
+            wayne_print(f"Updating submodule: {tool_path}...", "cyan")
+            submodule_update_result = subprocess.run(
+                ["git", "submodule", "update", "--init", "--recursive", "--progress", tool_path],
+                text=True # Ensure output is treated as text and passed through
+            )
+            if submodule_update_result.returncode != 0:
+                wayne_print(f"Failed to update submodule {tool_path}. Git command return code: {submodule_update_result.returncode}", "red")
+                # Potentially exit or handle error, for now, we'll just print a message
+
             if version:
                 wayne_print(f"Checking out version {version} for submodule {tool_name}...", 'yellow')
                 submodule_path = os.path.join(temp_dir, tool_path)
