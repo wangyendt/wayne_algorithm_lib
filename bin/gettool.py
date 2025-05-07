@@ -303,24 +303,66 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
 
             # Build or copytree logic for tools fetched via sparse-checkout
             if build:
-                # ... (build logic, ensuring paths are relative to temp_tool_src_path, target is final_target_dir/lib) ...
                 if not tool_config.get('buildable', False):
                     wayne_print(f'{tool_name} is not buildable, skip building', 'red')
+                    # If not buildable but build flag was set, should we copy source like build=false?
+                    # For now, do nothing more here, effectively it won't produce a different target_dir than if build was false and no copy happened.
+                    # Consider copying source as a fallback if buildable is false but build is true.
                 elif not os.path.exists(os.path.join(temp_tool_src_path, 'CMakeLists.txt')):
                     wayne_print(f'{tool_name} does not have a CMakeLists.txt in {temp_tool_src_path}, skip building', 'red')
                 else:
-                    build_command_dir = temp_tool_src_path
-                    # Simplified build, assuming it creates a 'lib' subdir to be copied
-                    wayne_print(f"Building {tool_name} in {build_command_dir}...", "blue")
-                    # Example: command = f'cd "{build_command_dir}" && mkdir -p build && cd build && cmake .. && make -j12'
-                    # os.system(command) # This builds in the temp directory
-                    # For this example, let's assume build places output in temp_tool_src_path/lib
-                    # and we copy that to final_target_dir (which might be final_target_dir/lib or just final_target_dir)
-                    # This part needs careful review based on actual build script behavior
-                    wayne_print("Build logic for sparse-checkout tools needs review and implementation here.","orange")
-                    # If final_target_dir is meant to BE the lib: shutil.copytree(os.path.join(temp_tool_src_path, 'lib/'), final_target_dir, dirs_exist_ok=True)
-                    # If final_target_dir is the tool root: shutil.copytree(os.path.join(temp_tool_src_path, 'lib/'), os.path.join(final_target_dir, 'lib'), dirs_exist_ok=True)
-            else: # Not building, just copy sources from sparse checkout
+                    # Restored and adapted build logic for non-submodule (sparse-checkout) tools
+                    wayne_print(f"Building {tool_name} in {temp_tool_src_path}...", "blue")
+                    original_cwd_for_build = os.getcwd() # Should be cpp_tools_repo_root
+                    
+                    build_dir_in_tool_src = os.path.join(temp_tool_src_path, 'build')
+                    if os.path.exists(build_dir_in_tool_src):
+                        shutil.rmtree(build_dir_in_tool_src)
+                    os.makedirs(build_dir_in_tool_src)
+                    
+                    try:
+                        os.chdir(build_dir_in_tool_src) # CD into .../cv/apriltag_detection/build
+                        
+                        wayne_print(f"Running CMake in {os.getcwd()} (source: ..)", "magenta")
+                        # Basic CMake command, remove capture_output=True to print log directly
+                        cmake_process = subprocess.run(["cmake", ".."], text=True, check=False)
+                        if cmake_process.returncode != 0:
+                            wayne_print(f"CMake failed for {tool_name} with return code {cmake_process.returncode}. Check output above.", "red")
+                        else:
+                            wayne_print(f"CMake successful for {tool_name}.", "green")
+                            wayne_print(f"Running make in {os.getcwd()}", "magenta")
+                            num_cores = os.cpu_count() or 1
+                            make_cmd = ["make", f"-j{num_cores}"]
+                            # Basic make command, remove capture_output=True to print log directly
+                            make_process = subprocess.run(make_cmd, text=True, check=False)
+                            if make_process.returncode != 0:
+                                wayne_print(f"Make failed for {tool_name} with return code {make_process.returncode}. Check output above.", "red")
+                            else:
+                                wayne_print(f"Make successful for {tool_name}.", "green")
+                                compiled_lib_path_in_source_tree = os.path.join(temp_tool_src_path, "lib") 
+
+                                if os.path.exists(compiled_lib_path_in_source_tree) and os.path.isdir(compiled_lib_path_in_source_tree):
+                                    if os.path.exists(final_target_dir):
+                                        shutil.rmtree(final_target_dir)
+                                    # Copy the content of temp_tool_src_path/lib to final_target_dir
+                                    # This assumes final_target_dir is meant to BE the lib directory content.
+                                    # If final_target_dir is foo/bar and lib is foo/bar/lib, adjust copytree dst.
+                                    # For this specific case, apriltag_detection outputs to ${CMAKE_CURRENT_SOURCE_DIR}/lib,
+                                    # and if gettool copies this to final_target_dir, final_target_dir becomes the effective 'lib' output.
+                                    shutil.copytree(compiled_lib_path_in_source_tree, final_target_dir, dirs_exist_ok=True)
+                                    wayne_print(f"Copied compiled library from {compiled_lib_path_in_source_tree} to {final_target_dir}", "green")
+                                else:
+                                    # Fallback if even source_dir/lib is not found.
+                                    wayne_print(f"Build successful, but expected 'lib' directory not found in {compiled_lib_path_in_source_tree} (source tree). \nAttempting to copy entire source tree {temp_tool_src_path} as fallback, assuming it might be header-only or configured in-place.", "yellow")
+                                    if os.path.exists(final_target_dir):
+                                        shutil.rmtree(final_target_dir)
+                                    shutil.copytree(temp_tool_src_path, final_target_dir, dirs_exist_ok=True) 
+                                    wayne_print(f"Copied entire source tree from {temp_tool_src_path} to {final_target_dir} as fallback.", "yellow")
+                    except Exception as e:
+                        wayne_print(f"An error occurred during the build process for {tool_name}: {e}", "red")
+                    finally:
+                        os.chdir(original_cwd_for_build) # CD back to cpp_tools_repo_root
+            else: # Not building (build=False for sparse-checkout tool)
                 if os.path.exists(final_target_dir):
                     shutil.rmtree(final_target_dir)
                 if clean:
