@@ -52,7 +52,7 @@ class PangolinViewer:
             from pangolin_viewer import PangolinViewer as Viewer
         except ImportError:
             os.makedirs(lib_path, exist_ok=True)
-            subprocess.run(['gettool', 'pangolin', '-b', '-t', str(lib_path)], check=True)
+            subprocess.run(['gettool', 'pangolin_viewer', '-b', '-t', str(lib_path)], check=True)
             importlib.invalidate_caches()
             Viewer = importlib.import_module("pangolin_viewer").PangolinViewer
         return Viewer(self.width, self.height, self.run_on_start)
