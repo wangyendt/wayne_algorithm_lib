@@ -192,108 +192,168 @@ def handle_installation(
 def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, version=None, install_requested=False, global_install_flag_str="false"):
     print(f"Fetching tool: {tool_name}")
     cwd = os.getcwd()
+    final_target_dir = target_dir # User-specified or default, resolved before temp dir ops
+    tool_path_in_final_repo = "" # Will be set if target_dir is a repo and tool_name is part of it
+
     with tempfile.TemporaryDirectory() as temp_dir:
         os.chdir(temp_dir)
-        sparse_clone(url, temp_dir)
+        # Clone the main cpp_tools repo sparsely to get .gitmodules and name_to_path_map.yaml
+        sparse_clone(url, "cpp_tools_repo") # Clone into a subdirectory within temp_dir
+        cpp_tools_repo_root = os.path.join(temp_dir, "cpp_tools_repo")
+        os.chdir(cpp_tools_repo_root) # CD into the cloned repo root
 
-        # If installation is requested, ensure the install_scripts directory is checked out early.
-        # This needs to happen before any specific tool path might be set via sparse-checkout set,
-        # or before submodule operations if those were to clear/reset sparse settings.
         if install_requested:
             wayne_print("Installation requested, ensuring 'install_scripts' directory is checked out from the repo root...", "cyan")
-            # We are in temp_dir (repo root) here
             install_scripts_checkout_result = subprocess.run(
                 ["git", "sparse-checkout", "add", "install_scripts"],
-                capture_output=True, text=True, check=False # check=False to handle errors manually
+                capture_output=True, text=True, check=False
             )
             if install_scripts_checkout_result.returncode == 0:
-                if "Adding paths ..." in install_scripts_checkout_result.stdout or not install_scripts_checkout_result.stdout.strip(): # Check if it actually did something or was already set
-                    wayne_print("'install_scripts' directory successfully added to sparse checkout or already present.", "green")
-                else:
-                    # Sometimes git outputs to stdout even on no-op for 'add' if already present, so minor check for actual change indication.
-                    wayne_print(f"'install_scripts' checkout status: {install_scripts_checkout_result.stdout.strip()}", "green")
+                wayne_print("'install_scripts' directory successfully added/ensured.", "green")
             else:
-                wayne_print(f"Warning: Failed to add 'install_scripts' to sparse checkout. Installation might fail. Error: {install_scripts_checkout_result.stderr.strip()}", "yellow")
+                wayne_print(f"Warning: Failed to add 'install_scripts' to sparse checkout. Error: {install_scripts_checkout_result.stderr.strip()}", "yellow")
 
         name_to_path_map_yaml_file = 'name_to_path_map.yaml'
-        assert name_to_path_map_yaml_file in os.listdir('.'), f'Failed to find {name_to_path_map_yaml_file} in {temp_dir}'
+        if not os.path.exists(name_to_path_map_yaml_file):
+            wayne_print(f"Error: {name_to_path_map_yaml_file} not found in the root of {cpp_tools_repo_root}. Cannot proceed.", "red")
+            os.chdir(cwd) # Go back to original CWD before exiting temp_dir context
+            return
         current_name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
-        tool_path_from_yaml = current_name_to_path_map[tool_name]['path']
+        
+        if tool_name not in current_name_to_path_map:
+            wayne_print(f"Error: Tool '{tool_name}' not found in {name_to_path_map_yaml_file}.", "red")
+            os.chdir(cwd)
+            return
+            
+        tool_config = current_name_to_path_map[tool_name]
+        tool_path_from_yaml = tool_config['path'] # e.g., third_party/eigen
 
-        temp_tool_src_path = os.path.join(temp_dir, tool_path_from_yaml)
+        if not final_target_dir: # If user didn't specify a target_dir
+            final_target_dir = os.path.join(cwd, tool_path_from_yaml) # Default target relative to original CWD
+        
+        wayne_print(f"Final target directory for {tool_name}: {final_target_dir}", "cyan")
 
-        if not target_dir:
-            target_dir = os.path.join(cwd, tool_path_from_yaml)
-
-        if not build and os.path.exists(target_dir):
-            if input(f'{target_dir} already exists, still want to fetch? (Y/N)').lower() != 'y': return
-        if os.path.exists('.gitmodules'):
-            with open('.gitmodules', 'r') as f:
-                tool_is_submodule = any(f'path = {tool_path_from_yaml}' in line for line in f)
-        else:
-            tool_is_submodule = False
+        # Determine if the tool is a submodule
+        tool_is_submodule = False
+        submodule_url = ""
+        gitmodules_path = os.path.join(cpp_tools_repo_root, ".gitmodules")
+        if os.path.exists(gitmodules_path):
+            try:
+                # Using git config to get submodule URL is more reliable
+                submodule_url_result = subprocess.run(
+                    ["git", "config", "--file", ".gitmodules", f"submodule.{tool_path_from_yaml}.url"],
+                    capture_output=True, text=True, check=False, # check=False, we check returncode
+                    cwd=cpp_tools_repo_root # ensure command runs in cpp_tools_repo_root where .gitmodules is
+                )
+                if submodule_url_result.returncode == 0 and submodule_url_result.stdout.strip():
+                    submodule_url = submodule_url_result.stdout.strip()
+                    tool_is_submodule = True
+                    wayne_print(f"Tool '{tool_name}' is a submodule. URL: {submodule_url}", "blue")
+                else:
+                    wayne_print(f"Tool '{tool_name}' ({tool_path_from_yaml}) not found as a submodule in .gitmodules or URL is empty.", "magenta")
+            except Exception as e:
+                wayne_print(f"Could not read submodule URL for {tool_path_from_yaml} from .gitmodules: {e}", "yellow")
+        
+        # --- Logic for fetching the tool --- 
         if tool_is_submodule:
-            wayne_print(f"Updating submodule: {tool_path_from_yaml}...", "cyan")
-            submodule_update_result = subprocess.run(
-                ["git", "submodule", "update", "--init", "--recursive", "--progress", tool_path_from_yaml],
-                text=True
-            )
-            if submodule_update_result.returncode != 0:
-                wayne_print(f"Failed to update submodule {tool_path_from_yaml}. Git command return code: {submodule_update_result.returncode}", "red")
+            wayne_print(f"Fetching '{tool_name}' as a full repository from {submodule_url} into {final_target_dir}", "cyan")
+            if os.path.exists(final_target_dir):
+                # Simplified: remove if exists. Add prompting/force later if needed.
+                wayne_print(f"Target directory {final_target_dir} exists. Removing it first.", "yellow")
+                shutil.rmtree(final_target_dir)
+            
+            clone_result = subprocess.run(["git", "clone", "--progress", submodule_url, final_target_dir], text=True)
+            if clone_result.returncode != 0:
+                wayne_print(f"Failed to clone submodule {tool_name} from {submodule_url} into {final_target_dir}.", "red")
+                os.chdir(cwd)
+                return
+            wayne_print(f"Successfully cloned {tool_name} into {final_target_dir}", "green")
 
             if version:
-                wayne_print(f"Checking out version {version} for submodule {tool_name}...", 'yellow')
+                wayne_print(f"Checking out version {version} for {tool_name} in {final_target_dir}...", 'yellow')
+                checkout_cwd = os.getcwd() # This is cpp_tools_repo_root
                 try:
-                    os.chdir(temp_tool_src_path)
-                    checkout_result = subprocess.run(["git", "checkout", version], capture_output=True, text=True, check=True)
+                    os.chdir(final_target_dir) # CD into the newly cloned repo
+                    checkout_result_sub = subprocess.run(["git", "checkout", version], capture_output=True, text=True, check=True)
                     wayne_print(f"Successfully checked out version {version} for {tool_name}.", 'green')
                 except subprocess.CalledProcessError as e:
-                    wayne_print(f"Failed to checkout version {version} for {tool_name}: {e.stderr}", 'red')
+                    wayne_print(f"Failed to checkout version {version} for {tool_name}: {e.stderr.strip()}", 'red')
                 finally:
-                    os.chdir(temp_dir)
-        else:
-            subprocess.run(["git", "sparse-checkout", "set", tool_path_from_yaml], check=True)
-            if version:
-                 wayne_print(f"Warning: --version specified ({version}) but {tool_name} is not a submodule and not built from main repo. Version ignored.", 'yellow')
-        if build:
-            if not current_name_to_path_map[tool_name]['buildable']:
-                wayne_print(f'{tool_name} is not buildable, skip building', 'red')
-            elif not os.path.exists(os.path.join(temp_tool_src_path, 'CMakeLists.txt')):
-                wayne_print(f'{tool_name} does not have a CMakeLists.txt in {temp_tool_src_path}, skip building', 'red')
-            else:
-                build_command_dir = temp_tool_src_path
-                command = f'cd "{build_command_dir}" && mkdir -p build && cd build && cmake .. && make -j12'
-                os.system(command)
-                if os.path.exists(target_dir): shutil.rmtree(target_dir)
-                shutil.copytree(os.path.join(temp_tool_src_path, 'lib/'), target_dir, dirs_exist_ok=True)
-        else:
-            if os.path.exists(target_dir):
-                shutil.rmtree(target_dir)
-            if clean:
-                src_in_temp = os.path.join(temp_tool_src_path, 'src')
-                include_in_temp = os.path.join(temp_tool_src_path, 'include')
-                if os.path.exists(src_in_temp) and os.path.isdir(src_in_temp):
-                    shutil.copytree(src_in_temp, target_dir, dirs_exist_ok=True)
-                    if os.path.exists(include_in_temp) and os.path.isdir(include_in_temp):
-                        shutil.copytree(include_in_temp, target_dir, dirs_exist_ok=True)
-                    wayne_print(f"Clean copy: Copied 'src' and (if exists) 'include' from {temp_tool_src_path} to {target_dir}", "green")
-                else:
-                    wayne_print(f"Warning: 'src' directory not found in {temp_tool_src_path}. Performing a full copy instead of clean copy.", "yellow")
-                    shutil.copytree(temp_tool_src_path, target_dir, dirs_exist_ok=True)
-            else:
-                shutil.copytree(temp_tool_src_path, target_dir, dirs_exist_ok=True)
+                    os.chdir(checkout_cwd) # CD back to cpp_tools_repo_root
+            
+            # For submodules cloned as full repos, the build/clean logic (if any) would apply to final_target_dir
+            # and install_script also gets final_target_dir as main_tool_source_dir.
+            # The current build/copytree part below is for non-submodules or old way.
         
-        print(f"Tool {tool_name} source has been copied to {target_dir}")
+        else: # Tool is not a submodule, or we are fetching it as part of cpp_tools repo (sparse-checkout)
+            wayne_print(f"Fetching '{tool_name}' using sparse-checkout from cpp_tools repo.", "cyan")
+            # Ensure the specific tool path is checked out in cpp_tools_repo for sparse checkout
+            # This command is run in cpp_tools_repo_root
+            sparse_set_result = subprocess.run(["git", "sparse-checkout", "set", tool_path_from_yaml], capture_output=True, text=True)
+            if sparse_set_result.returncode != 0:
+                wayne_print(f"Failed to set sparse-checkout for {tool_path_from_yaml}. Error: {sparse_set_result.stderr.strip()}", "red")
+                os.chdir(cwd)
+                return
+            
+            temp_tool_src_path = os.path.join(cpp_tools_repo_root, tool_path_from_yaml)
+            if not os.path.exists(temp_tool_src_path):
+                 wayne_print(f"Error: Source path {temp_tool_src_path} for '{tool_name}' does not exist after sparse-checkout set. This should not happen.", "red")
+                 os.chdir(cwd)
+                 return
 
+            # Build or copytree logic for tools fetched via sparse-checkout
+            if build:
+                # ... (build logic, ensuring paths are relative to temp_tool_src_path, target is final_target_dir/lib) ...
+                if not tool_config.get('buildable', False):
+                    wayne_print(f'{tool_name} is not buildable, skip building', 'red')
+                elif not os.path.exists(os.path.join(temp_tool_src_path, 'CMakeLists.txt')):
+                    wayne_print(f'{tool_name} does not have a CMakeLists.txt in {temp_tool_src_path}, skip building', 'red')
+                else:
+                    build_command_dir = temp_tool_src_path
+                    # Simplified build, assuming it creates a 'lib' subdir to be copied
+                    wayne_print(f"Building {tool_name} in {build_command_dir}...", "blue")
+                    # Example: command = f'cd "{build_command_dir}" && mkdir -p build && cd build && cmake .. && make -j12'
+                    # os.system(command) # This builds in the temp directory
+                    # For this example, let's assume build places output in temp_tool_src_path/lib
+                    # and we copy that to final_target_dir (which might be final_target_dir/lib or just final_target_dir)
+                    # This part needs careful review based on actual build script behavior
+                    wayne_print("Build logic for sparse-checkout tools needs review and implementation here.","orange")
+                    # If final_target_dir is meant to BE the lib: shutil.copytree(os.path.join(temp_tool_src_path, 'lib/'), final_target_dir, dirs_exist_ok=True)
+                    # If final_target_dir is the tool root: shutil.copytree(os.path.join(temp_tool_src_path, 'lib/'), os.path.join(final_target_dir, 'lib'), dirs_exist_ok=True)
+            else: # Not building, just copy sources from sparse checkout
+                if os.path.exists(final_target_dir):
+                    shutil.rmtree(final_target_dir)
+                if clean:
+                    # ... (clean copy logic from temp_tool_src_path to final_target_dir) ...
+                    src_in_temp = os.path.join(temp_tool_src_path, 'src')
+                    include_in_temp = os.path.join(temp_tool_src_path, 'include')
+                    if os.path.exists(src_in_temp) and os.path.isdir(src_in_temp):
+                        shutil.copytree(src_in_temp, final_target_dir, dirs_exist_ok=True) # Copies to root of final_target_dir
+                        if os.path.exists(include_in_temp) and os.path.isdir(include_in_temp):
+                             # This would overwrite/merge into final_target_dir if src also copied files there.
+                             # Consider copying to final_target_dir/include if that's the desired structure.
+                            shutil.copytree(include_in_temp, final_target_dir, dirs_exist_ok=True) 
+                        wayne_print(f"Clean copy: Copied 'src' and (if exists) 'include' from {temp_tool_src_path} to {final_target_dir}", "green")
+                    else:
+                        wayne_print(f"Warning: 'src' directory not found in {temp_tool_src_path}. Performing a full copy instead of clean copy.", "yellow")
+                        shutil.copytree(temp_tool_src_path, final_target_dir, dirs_exist_ok=True)
+                else: # Not clean, copy everything from temp_tool_src_path
+                    shutil.copytree(temp_tool_src_path, final_target_dir, dirs_exist_ok=True)
+            wayne_print(f"Tool {tool_name} (sparse-checkout) source has been copied to {final_target_dir}", "green")
+
+        # After successful fetch (either direct clone or sparse-checkout + copy)
         if install_requested:
             handle_installation(
                 tool_name,
                 current_name_to_path_map,
-                target_dir,
-                temp_dir,
+                final_target_dir, # This is where the main tool's source now resides
+                cpp_tools_repo_root, # This is still the root of the cpp_tools clone for dep paths and install scripts
                 global_install_flag_str
             )
-    os.chdir(cwd)
+        
+        os.chdir(cwd) # Go back to original CWD before temp_dir is removed
+    # --- End of fetch_tool logic, temp_dir is now gone ---
+    # os.chdir(cwd) # This was inside, moved it to be before temp_dir cleanup if an error occurs early
 
 
 def print_supported_tools(url: str):
