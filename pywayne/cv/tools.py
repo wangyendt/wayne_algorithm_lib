@@ -1,10 +1,8 @@
 import cv2
 import numpy as np
-# import logging # Removed logging import
 from typing import Optional, Union, Dict, Any, List
 from pywayne.tools import wayne_print # Added wayne_print import
 
-# logger = logging.getLogger(__name__) # Removed logger initialization
 
 def _parse_cv_node(node: cv2.FileNode) -> Any:
     """Recursively parses a cv2.FileNode."""
@@ -150,58 +148,146 @@ def write_cv_yaml(file_path: str, data: Dict[str, Any]) -> bool:
     Returns:
         如果写入成功则返回 True，否则返回 False。
     """
+    fs = None # Initialize fs to None
     try:
         fs = cv2.FileStorage(file_path, cv2.FILE_STORAGE_WRITE)
         if not fs.isOpened():
-            # logger.error(f"Failed to open OpenCV YAML file for writing: {file_path}")
             wayne_print(f"Failed to open OpenCV YAML file for writing: {file_path}", color='red')
             return False
 
         for key, value in data.items():
-            if isinstance(value, np.ndarray):
-                fs.write(key, value)
-            elif isinstance(value, (int, float, str)):
-                fs.write(key, value)
-            elif isinstance(value, list): # Basic list writing (as sequence)
-                fs.startWriteStruct(key, cv2.FileNode_SEQ)
-                for item in value:
-                     # Note: Writing complex items within list needs specific handling
-                     if isinstance(item, (int, float, str)):
-                          fs.write("", item) # OpenCV uses empty string for unnamed sequence items
-                     else:
-                         # logger.warning(f"Skipping unsupported type {type(item)} in list for key '{key}'")
-                         wayne_print(f"Skipping unsupported type {type(item)} in list for key '{key}'", color='yellow')
-                fs.endWriteStruct()
-            elif isinstance(value, dict): # Basic dictionary writing (as map)
-                fs.startWriteStruct(key, cv2.FileNode_MAP)
-                for sub_key, sub_value in value.items():
-                     # Note: Writing complex items within dict needs specific handling
-                     if isinstance(sub_value, (int, float, str, np.ndarray)):
-                         fs.write(sub_key, sub_value)
-                     else:
-                          # logger.warning(f"Skipping unsupported type {type(sub_value)} in dict for key '{key}.{sub_key}'")
-                          wayne_print(f"Skipping unsupported type {type(sub_value)} in dict for key '{key}.{sub_key}'", color='yellow')
-                fs.endWriteStruct()
-            elif value is None:
-                 # OpenCV FileStorage doesn't have a direct way to write None.
-                 # We can skip or write an empty string/map based on desired behavior.
-                 # logger.warning(f"Skipping None value for key: {key}")
-                 wayne_print(f"Skipping None value for key: {key}", color='yellow')
-                 # fs.write(key, "") # Alternative: write empty string
-            else:
-                # logger.warning(f"Skipping unsupported type {type(value)} for key: {key}")
-                wayne_print(f"Skipping unsupported type {type(value)} for key: {key}", color='yellow')
+            _write_cv_node(fs, key, value)
 
-        fs.release()
+        # fs.release() # release in finally
         return True
     except cv2.error as e:
-        # logger.error(f"Error writing OpenCV YAML file {file_path}: {e}")
         wayne_print(f"Error writing OpenCV YAML file {file_path}: {e}", color='red')
         return False
     except Exception as e:
-        # logger.error(f"An unexpected error occurred while writing {file_path}: {e}")
         wayne_print(f"An unexpected error occurred while writing {file_path}: {e}", color='red')
-        # Ensure fs is released if it was opened
-        if 'fs' in locals() and fs.isOpened():
-             fs.release()
+        # traceback.print_exc() # Optional: print full traceback for debugging
         return False
+    finally:
+        if fs is not None and fs.isOpened():
+            try:
+                fs.release()
+            except Exception as e:
+                 wayne_print(f"Error releasing FileStorage for {file_path}: {e}", color='red')
+
+
+def _write_cv_node(fs: cv2.FileStorage, key: str, value: Any):
+    """
+    Helper function to write a node (key-value pair) to the OpenCV FileStorage.
+    Handles different data types including nested dictionaries and lists.
+    """
+    if isinstance(value, np.ndarray):
+        fs.write(key, value)
+    elif isinstance(value, (int, float, str)):
+        fs.write(key, value)
+    elif isinstance(value, list):
+        # For lists, use startWriteStruct with FileNode_SEQ
+        # If key is provided (e.g. for top-level list or list in dict), use it.
+        # If this is an item within a list, key should be empty string by OpenCV's convention
+        fs.startWriteStruct(key, cv2.FileNode_SEQ)
+        for item in value:
+            # For items in a sequence, the "key" is empty.
+            # We recursively call _write_cv_node with an empty key for the item itself.
+            # This might need adjustment based on how OpenCV expects unnamed items to be written.
+            # OpenCV uses an empty string for unnamed sequence items.
+            _write_cv_node(fs, "", item) # Pass empty key for list items
+        fs.endWriteStruct()
+    elif isinstance(value, dict):
+        # For dicts, use startWriteStruct with FileNode_MAP
+        fs.startWriteStruct(key, cv2.FileNode_MAP)
+        for sub_key, sub_value in value.items():
+            _write_cv_node(fs, sub_key, sub_value) # Recursive call for sub-dictionary
+        fs.endWriteStruct()
+    elif value is None:
+        wayne_print(f"Skipping None value for key: {key}", color='yellow')
+        # OpenCV FileStorage doesn't have a direct way to write None.
+        # We can skip or write an empty string/map. For now, skipping.
+        # fs.write(key, "") # Alternative: write empty string or an empty map
+    else:
+        wayne_print(f"Skipping unsupported type {type(value)} for key: {key}", color='yellow')
+
+
+if __name__ == '__main__':
+    import os
+    # 1. Create a sample dictionary with various data types
+    sample_data_to_write = {
+        "camera_name": "test_camera_01",
+        "image_width": 1920,
+        "image_height": 1080,
+        "fps": 60.5,
+        "is_color": True,
+        "calibration_matrix": np.array([[1000.0, 0.0, 960.0],
+                                        [0.0, 1000.0, 540.0],
+                                        [0.0, 0.0, 1.0]], dtype=np.float64),
+        "distortion_coeffs": np.array([-0.1, 0.01, 0.001, 0.0005, 0.0]),
+        "simple_list": [1, 2, 3, 4, 5],
+        "list_of_strings": ["apple", "banana", "cherry"],
+        "list_with_mixed_types": [10, "mixed", 20.5, False],
+        "nested_info": {
+            "sensor_type": "CMOS",
+            "serial_number": "SN12345XYZ",
+            "calibration_date": "2024-07-30",
+            "sub_parameters": {
+                "param_A": 123,
+                "param_B": "value_b",
+                "param_C_list": [0.1, 0.2, 0.3]
+            }
+        },
+        "empty_nested_dict": {},
+        "list_of_dictionaries": [
+            {"id": 1, "name": "item1", "value": 100},
+            {"id": 2, "name": "item2", "value": 200.5},
+            {"id": 3, "name": "item3", "tags": ["tagA", "tagB"]}
+        ],
+        "none_value_test": None, # This will be skipped during writing as per current _write_cv_node
+        "transformation_matrix": np.random.rand(4, 4)
+    }
+
+    yaml_file_path = "example_cv.yaml"
+
+    # 2. Write the dictionary to a YAML file
+    wayne_print(f"\nAttempting to write data to '{yaml_file_path}'...", color='cyan')
+    write_success = write_cv_yaml(yaml_file_path, sample_data_to_write)
+
+    if write_success:
+        wayne_print(f"Successfully wrote data to '{yaml_file_path}'", color='green')
+
+        # 3. Read the data back from the YAML file
+        wayne_print(f"\nAttempting to read data from '{yaml_file_path}'...", color='cyan')
+        read_data = read_cv_yaml(yaml_file_path)
+
+        if read_data is not None:
+            wayne_print("Successfully read data:", color='green')
+            # You can add more detailed checks here if needed
+            # For example, comparing read_data with sample_data_to_write
+            # (Note: direct comparison might fail for np.arrays without element-wise check)
+            for key, value in read_data.items():
+                if isinstance(value, np.ndarray):
+                    wayne_print(f"  {key} (np.ndarray shape: {value.shape}, dtype: {value.dtype}):\n{value}", color='blue')
+                elif isinstance(value, dict):
+                    wayne_print(f"  {key} (dict):", color='blue')
+                    for sub_key, sub_value in value.items(): # type: ignore
+                        wayne_print(f"    {sub_key}: {sub_value}", color='magenta')
+                elif isinstance(value, list):
+                    wayne_print(f"  {key} (list, {len(value)} items): {value}", color='blue')
+                else:
+                    wayne_print(f"  {key}: {value} (type: {type(value).__name__})", color='blue')
+        else:
+            wayne_print(f"Failed to read data from '{yaml_file_path}'", color='red')
+    else:
+        wayne_print(f"Failed to write data to '{yaml_file_path}'", color='red')
+
+    # 4. Clean up: Remove the created YAML file
+    if os.path.exists(yaml_file_path):
+        try:
+            os.remove(yaml_file_path)
+            wayne_print(f"\nSuccessfully removed temporary file '{yaml_file_path}'", color='green')
+        except OSError as e:
+            wayne_print(f"\nError removing temporary file '{yaml_file_path}': {e}", color='red')
+    else:
+        wayne_print(f"\nTemporary file '{yaml_file_path}' was not found for cleanup.", color='yellow')
+

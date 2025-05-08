@@ -5,8 +5,8 @@ OpenCV YAML 文件读写
 
 **主要功能**:
 
-- `read_cv_yaml(file_path: str)`: 读取 OpenCV YAML 文件并返回一个字典。支持基本数据类型和 NumPy 数组。
-- `write_cv_yaml(file_path: str, data: dict)`: 将包含基本数据类型和 NumPy 数组的字典写入 OpenCV YAML 文件。
+- `read_cv_yaml(file_path: str)`: 读取 OpenCV YAML 文件并返回一个字典。支持基本数据类型、NumPy 数组以及嵌套的字典和列表。
+- `write_cv_yaml(file_path: str, data: dict)`: 将字典写入 OpenCV YAML 文件。支持基本数据类型、NumPy 数组，以及嵌套的字典和列表。
 
 **示例**::
 
@@ -19,7 +19,12 @@ OpenCV YAML 文件读写
    ...     "integer_value": 10,
    ...     "float_value": 3.14,
    ...     "string_value": "hello_cv",
-   ...     "list_value": [1, 2, 3]
+   ...     "list_value": [1, 2, 3, {"nested_in_list": "item_in_list_dict"}],
+   ...     "nested_dictionary": {
+   ...         "sub_item_A": "text_val",
+   ...         "sub_item_B": 789,
+   ...         "sub_list_in_dict": [True, False, 0.5]
+   ...     }
    ... }
    >>> 
    >>> # 写入 YAML 文件
