@@ -13,7 +13,7 @@ import sys
 import subprocess
 import importlib
 import numpy as np
-from typing import Union, Tuple, Dict, Any
+from typing import Union, Tuple, Dict, Any, List
 from pathlib import Path
 from pywayne.cv.tools import write_cv_yaml # Use write_cv_yaml from tools
 
@@ -58,7 +58,7 @@ class CameraModel:
             try:
                 os.makedirs(lib_path, exist_ok=True)
                 # Ensure gettool is available in PATH or provide full path if necessary
-                subprocess.run(['gettool', tool_name, '-b', '-t', str(lib_path)], check=True, capture_output=True, text=True)
+                subprocess.run(['gettool', tool_name, '-b', '-t', str(lib_path)], check=True)
                 print(f"Successfully acquired '{tool_name}' into {lib_path}")
                 importlib.invalidate_caches() # Ensure import system sees the new module
                 return importlib.import_module(lib_name)
@@ -148,40 +148,40 @@ class CameraModel:
         return self.camera.image_height
 
     # --- Core Camera Methods ---
-    def lift_projective(self, p: Tuple[float, float]) -> Tuple[float, float, float]:
+    def lift_projective(self, p: Union[Tuple[float, float], List[float], np.ndarray]) -> np.ndarray:
         """
         Lifts a 2D image point to a 3D projective ray (unit vector).
 
         Args:
-            p: A tuple (u, v) representing the image point coordinates.
+            p: A tuple, list, or NumPy array (u, v) representing the image point coordinates.
 
         Returns:
-            A tuple (x, y, z) representing the 3D direction vector.
+            A NumPy array (x, y, z) representing the 3D direction vector.
         """
         self._ensure_camera_loaded()
         try:
-            # The pybind layer should handle tuple -> Eigen::Vector2d
-            # and Eigen::Vector3d -> list/numpy array. We convert back to tuple.
+            # The pybind layer should handle tuple/list/ndarray -> Eigen::Vector2d
+            # and Eigen::Vector3d -> numpy array.
             P = self.camera.lift_projective(p)
-            return tuple(P)
+            return np.array(P, dtype=np.float64) # Ensure output is np.ndarray
         except Exception as e:
             raise RuntimeError(f"Error during lift_projective for point {p}: {e}") from e
 
-    def space_to_plane(self, P: Tuple[float, float, float]) -> Tuple[float, float]:
+    def space_to_plane(self, P: Union[Tuple[float, float, float], List[float], np.ndarray]) -> np.ndarray:
         """
         Projects a 3D point in camera coordinates onto the 2D image plane.
 
         Args:
-            P: A tuple (x, y, z) representing the 3D point.
+            P: A tuple, list, or NumPy array (x, y, z) representing the 3D point.
 
         Returns:
-            A tuple (u, v) representing the projected image point coordinates.
+            A NumPy array (u, v) representing the projected image point coordinates.
         """
         self._ensure_camera_loaded()
         try:
-            # pybind handles tuple -> Eigen::Vector3d and Eigen::Vector2d -> list/numpy
-            p = self.camera.space_to_plane(P)
-            return tuple(p)
+            # pybind handles tuple/list/ndarray -> Eigen::Vector3d and Eigen::Vector2d -> numpy array
+            p_out = self.camera.space_to_plane(P) # Renamed to avoid conflict with input p for lift_projective
+            return np.array(p_out, dtype=np.float64) # Ensure output is np.ndarray
         except Exception as e:
             raise RuntimeError(f"Error during space_to_plane for point {P}: {e}") from e
 
