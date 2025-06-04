@@ -28,3 +28,5 @@ shapely
 
 gtts
 lark_oapi
+
+statsmodels

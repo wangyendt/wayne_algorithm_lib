@@ -72,7 +72,7 @@ setuptools.setup(
         'gui': ["easygui", "pynput"],
         'image': ["pillow"],
         'aws': ["boto3", "botocore", "oss2"],
-        'data': ["h5py", "seaborn", "pyperclip"],
+        'data': ["h5py", "seaborn", "pyperclip", "statsmodels"],
         'geo': ["concave_hull", "alphashape", "shapely"],
         'bot': ["lark-oapi", 'gtts']
     },

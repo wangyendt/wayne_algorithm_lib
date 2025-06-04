@@ -1,10 +1,12 @@
 # from . import tools, tt_api
+from . import statistics
 
 __all__ = [
     'tools',
     'dsp',
     'gui',
     'maths',
+    'statistics',
     'data_structure',
     'plot',
     'ahrs',
