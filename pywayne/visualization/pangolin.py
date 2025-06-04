@@ -158,6 +158,77 @@ class PangolinViewer:
             color = Colors.GRAY
         self.viewer.add_plane_normal_center(normal.astype(np.float32), center.astype(np.float32), size, color, alpha, label)
         
+    def add_chessboard(self, rows=8, cols=8, cell_size=0.1, origin=None, normal=None, 
+                       color1=None, color2=None, alpha=0.8, label="chessboard"):
+        """
+        绘制棋盘
+        
+        Args:
+            rows: 行数，默认8
+            cols: 列数，默认8
+            cell_size: 单个格子的尺寸，默认0.1
+            origin: 棋盘原点（左下角），默认为(0,0,0)
+            normal: 棋盘法向量，默认为(0,0,1)，即XY平面
+            color1: 第一种颜色（黑色格子），默认为黑色
+            color2: 第二种颜色（白色格子），默认为白色
+            alpha: 透明度，默认0.8
+            label: 标签前缀，默认"chessboard"
+        """
+        if origin is None:
+            origin = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            origin = origin.astype(np.float32)
+            
+        if normal is None:
+            normal = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        else:
+            normal = normal.astype(np.float32)
+            normal = normal / np.linalg.norm(normal)  # 归一化
+            
+        if color1 is None:
+            color1 = Colors.BLACK
+        if color2 is None:
+            color2 = Colors.WHITE
+            
+        # 构建局部坐标系
+        # 找到一个与normal不平行的向量作为参考
+        if abs(normal[2]) < 0.9:
+            up_ref = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        else:
+            up_ref = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+            
+        # 构建正交基
+        u_axis = np.cross(normal, up_ref)
+        u_axis = u_axis / np.linalg.norm(u_axis)  # 归一化u轴
+        v_axis = np.cross(normal, u_axis)  # v轴
+        
+        # 绘制每个格子
+        for row in range(rows):
+            for col in range(cols):
+                # 计算格子中心
+                u_offset = (col - cols/2.0 + 0.5) * cell_size
+                v_offset = (row - rows/2.0 + 0.5) * cell_size
+                cell_center = origin + u_offset * u_axis + v_offset * v_axis
+                
+                # 计算格子的四个顶点
+                half_size = cell_size / 2.0
+                vertices = np.array([
+                    cell_center - half_size * u_axis - half_size * v_axis,
+                    cell_center + half_size * u_axis - half_size * v_axis,
+                    cell_center + half_size * u_axis + half_size * v_axis,
+                    cell_center - half_size * u_axis + half_size * v_axis
+                ], dtype=np.float32)
+                
+                # 根据行列位置选择颜色（棋盘模式）
+                if (row + col) % 2 == 0:
+                    color = color1  # 黑色格子
+                else:
+                    color = color2  # 白色格子
+                    
+                # 添加格子
+                cell_label = f"{label}_r{row}_c{col}"
+                self.add_plane(vertices, color=color, alpha=alpha, label=cell_label)
+        
     # Line API
     def clear_all_lines(self):
         self.viewer.clear_all_lines()
@@ -287,7 +358,7 @@ if __name__ == '__main__':
     helix_traj_se3 = make_helix_traj()
     
     # 创建Pangolin查看器 (直接使用当前文件定义的类)
-    viewer = PangolinViewer(640, 480, False)
+    viewer = PangolinViewer(800, 600, False)
     viewer.set_img_resolution(752, 480)
     viewer.init()
     
@@ -351,7 +422,7 @@ if __name__ == '__main__':
                 color=Colors.CYAN, 
                 label="helix_se3", 
                 line_width=2.0, 
-                show_cameras=False, # 不在这里显示相机模型
+                show_cameras=False, # 不在这里显示相机
                 camera_size=0.04
             )
             current_helix_pose_se3 = helix_traj_se3[helix_idx]
@@ -453,6 +524,18 @@ if __name__ == '__main__':
                                    0.5], dtype=np.float32)
         viewer.add_line(np.zeros(3, dtype=np.float32), line_end_point, 
                       color=Colors.YELLOW, line_width=3.0, label="dynamic_line")
+        
+        # 6.6 新增：添加棋盘演示        
+        # 在YZ平面添加彩色棋盘
+        viewer.add_chessboard(
+            rows=12, 
+            cols=12, 
+            cell_size=0.08, 
+            origin=np.array([0.0, -0.5, 1.0], dtype=np.float32),
+            normal=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+            alpha=0.8,
+            label="colored_chessboard"
+        )
         
         # 7. 更新和显示图像 (使用新 API)
         img_copy = img.copy() # Start with the base image
