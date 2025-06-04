@@ -18,6 +18,7 @@ Pangolin 查看器 (pangolin)
      - **轨迹**: 支持通过位置+四元数 (多种格式) 或 SE3 矩阵发布轨迹，可选择显示相机模型。
      - **相机**: 支持独立添加和管理相机位姿（通过四元数或 SE3），并设置主跟随相机。
      - **平面**: 支持通过顶点或法线+中心点添加（半透明）平面。
+     - **棋盘**: 支持在任意平面上绘制可定制的棋盘模式，用于标定、测试或装饰。
      - **直线**: 支持添加指定起点、终点、颜色和线宽的线段。
    - 支持显示左右两个视图的图像（通过 Numpy 数组或文件路径）。
    - 提供窗口控制（运行、关闭、重置、刷新）和状态查询功能。
@@ -52,6 +53,8 @@ Pangolin 查看器 (pangolin)
      - `clear_all_planes()`
      - `add_plane(vertices, color, alpha, label)`
      - `add_plane_normal_center(normal, center, size, color, alpha, label)`
+   - **棋盘 API**:
+     - `add_chessboard(rows, cols, cell_size, origin, normal, color1, color2, alpha, label)`
    - **直线 API**:
      - `clear_all_lines()`
      - `add_line(start_point, end_point, color, line_width, label)`
@@ -134,6 +137,22 @@ Pangolin 查看器 (pangolin)
       ...     # 添加一条直线
       ...     viewer.add_line(np.zeros(3), helix_positions[frame], color=Colors.WHITE, line_width=2.0)
       ... 
+      ...     # 添加棋盘演示
+      ...     # 在XY平面添加标准黑白棋盘
+      ...     viewer.add_chessboard(
+      ...         rows=8, cols=8, cell_size=0.1,
+      ...         origin=np.array([2.0, 0.0, 0.0], dtype=np.float32),
+      ...         label="standard_board"
+      ...     )
+      ...     # 在YZ平面添加彩色棋盘
+      ...     viewer.add_chessboard(
+      ...         rows=6, cols=6, cell_size=0.08,
+      ...         origin=np.array([0.0, 2.0, 0.5], dtype=np.float32),
+      ...         normal=np.array([1.0, 0.0, 0.0], dtype=np.float32),
+      ...         color1=Colors.RED, color2=Colors.YELLOW,
+      ...         alpha=0.8, label="colored_board"
+      ...     )
+      ...
       ...     viewer.show(delay_time_in_s=0.05)
       ...     frame += 1
       ...     # time.sleep(0.05) # Use viewer.show delay instead
@@ -145,3 +164,52 @@ Pangolin 查看器 (pangolin)
 --------------------------------------------------
 
 通过上述示例，用户可以快速掌握 visualization 模块中 PangolinViewer 类的主要功能，并将其应用于机器人、计算机视觉等领域中的 3D 数据实时展示和交互控制。 
+
+棋盘 API 详细说明
+------------------
+
+   **add_chessboard() 方法**:
+
+   用于在3D空间中绘制棋盘模式，常用于相机标定、空间参考或视觉装饰。
+
+   **参数**:
+     - `rows` (int, 默认=8): 棋盘行数
+     - `cols` (int, 默认=8): 棋盘列数  
+     - `cell_size` (float, 默认=0.1): 单个格子的边长
+     - `origin` (numpy.ndarray, 默认=None): 棋盘原点位置，默认为(0,0,0)
+     - `normal` (numpy.ndarray, 默认=None): 棋盘平面法向量，默认为(0,0,1)即XY平面
+     - `color1` (numpy.ndarray, 默认=None): 第一种颜色（黑格），默认为黑色
+     - `color2` (numpy.ndarray, 默认=None): 第二种颜色（白格），默认为白色
+     - `alpha` (float, 默认=0.8): 透明度，范围0-1
+     - `label` (str, 默认="chessboard"): 标签前缀
+
+   **特性**:
+     - 自动构建任意方向的局部坐标系
+     - 支持XY、XZ、YZ或任意倾斜平面
+     - 标准棋盘黑白相间模式
+     - 每个格子独立标签：`{label}_r{row}_c{col}`
+
+   **常见用法**::
+
+      >>> # 基本用法 - 默认8x8黑白棋盘
+      >>> viewer.add_chessboard()
+      >>> 
+      >>> # 相机标定棋盘 - 精确尺寸
+      >>> viewer.add_chessboard(
+      ...     rows=9, cols=6, cell_size=0.025,  # 25mm格子
+      ...     origin=np.array([0.0, 0.0, 0.0], dtype=np.float32)
+      ... )
+      >>> 
+      >>> # 竖直墙面棋盘 - YZ平面
+      >>> viewer.add_chessboard(
+      ...     rows=6, cols=4, cell_size=0.1,
+      ...     origin=np.array([0.0, 1.0, 0.5], dtype=np.float32),
+      ...     normal=np.array([1.0, 0.0, 0.0], dtype=np.float32)
+      ... )
+      >>> 
+      >>> # 彩色装饰棋盘
+      >>> viewer.add_chessboard(
+      ...     rows=5, cols=5, cell_size=0.08,
+      ...     color1=Colors.BLUE, color2=Colors.ORANGE,
+      ...     alpha=0.7, label="decoration"
+      ... ) 

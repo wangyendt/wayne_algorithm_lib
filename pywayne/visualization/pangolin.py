@@ -526,7 +526,7 @@ if __name__ == '__main__':
                       color=Colors.YELLOW, line_width=3.0, label="dynamic_line")
         
         # 6.6 新增：添加棋盘演示        
-        # 在YZ平面添加彩色棋盘
+        # 在XY平面添加棋盘
         viewer.add_chessboard(
             rows=12, 
             cols=12, 
