@@ -266,8 +266,9 @@ class CrossCommService:
     
     # ========== 服务器端方法 ==========
     
-    async def _server_handle_client(self, websocket: WebSocketServerProtocol, path: str):
+    async def _server_handle_client(self, websocket, *args, **kwargs):
         """服务器处理客户端连接"""
+        # 兼容不同版本的websockets库，有些版本会传递path参数，有些不会
         client_id = None
         try:
             async for message_data in websocket:
