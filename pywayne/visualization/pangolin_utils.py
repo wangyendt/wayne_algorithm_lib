@@ -49,7 +49,7 @@ class PangolinViewer:
         lib_path = os.path.join(os.path.dirname(__file__), 'lib')
         sys.path.append(str(lib_path))
         try:
-            from pangolin_viewer import PangolinViewer as Viewer
+            from pywayne.visualization.pangolin_utils import PangolinViewer as Viewer
         except ImportError:
             os.makedirs(lib_path, exist_ok=True)
             subprocess.run(['gettool', 'pangolin_viewer', '-b', '-t', str(lib_path)], check=True)
@@ -157,6 +157,39 @@ class PangolinViewer:
         if color is None:
             color = Colors.GRAY
         self.viewer.add_plane_normal_center(normal.astype(np.float32), center.astype(np.float32), size, color, alpha, label)
+    
+    def add_plane_from_Twp(self, Twp, size, color=None, alpha=0.5, label=""):
+        """
+        通过变换矩阵添加3D平面
+        
+        使用4x4变换矩阵定义平面的位置和朝向。变换矩阵完全确定了平面在世界坐标系中的位姿。
+        
+        Args:
+            Twp (np.ndarray): 平面在世界坐标系中的位姿矩阵，形状为(4, 4)。
+                             这是一个SE(3)变换矩阵，定义了平面的位置和朝向
+            size (float): 平面的半尺寸（从中心到边缘的距离）
+            color (np.ndarray, optional): 平面颜色，RGB格式，默认为灰色
+            alpha (float, optional): 透明度，默认为0.5
+            label (str, optional): 平面在Pangolin中的标签，默认为空字符串
+        
+        Examples:
+            >>> # 添加单位矩阵定义的平面（原点处，Z轴向上）
+            >>> Twp = np.eye(4)
+            >>> viewer.add_plane_from_Twp(Twp, 1.0)
+            
+            >>> # 添加旋转的平面
+            >>> import pywayne.vio.SE3 as SE3
+            >>> Twp = SE3.SE3_exp(np.array([1, 2, 3, 0, 0, np.pi/4]))
+            >>> viewer.add_plane_from_Twp(Twp, 0.5, color=np.array([0, 1, 0]))
+        """
+        if color is None:
+            color = Colors.GRAY
+        
+        # 从变换矩阵提取位置和朝向
+        center = Twp[:3, 3].astype(np.float32)
+        normal = Twp[:3, 2].astype(np.float32)  # Z轴作为法向量
+        
+        self.add_plane_normal_center(normal, center, size, color, alpha, label)
         
     def add_chessboard(self, rows=8, cols=8, cell_size=0.1, origin=None, normal=None, 
                        color1=None, color2=None, alpha=0.8, label="chessboard"):
@@ -167,7 +200,7 @@ class PangolinViewer:
             rows: 行数，默认8
             cols: 列数，默认8
             cell_size: 单个格子的尺寸，默认0.1
-            origin: 棋盘原点（左下角），默认为(0,0,0)
+            origin: 棋盘中间点坐标，默认为(0,0,0)
             normal: 棋盘法向量，默认为(0,0,1)，即XY平面
             color1: 第一种颜色（黑色格子），默认为黑色
             color2: 第二种颜色（白色格子），默认为白色
@@ -228,6 +261,82 @@ class PangolinViewer:
                 # 添加格子
                 cell_label = f"{label}_r{row}_c{col}"
                 self.add_plane(vertices, color=color, alpha=alpha, label=cell_label)
+    
+    def add_chessboard_from_Twp(self, rows=8, cols=8, cell_size=0.1, Twp=None, 
+                               color1=None, color2=None, alpha=0.8, label="chessboard"):
+        """
+        通过变换矩阵绘制3D棋盘格
+        
+        使用4x4变换矩阵定义棋盘的位置和朝向。棋盘可以放置在3D空间的任意位置和朝向。
+        每个格子都是独立的平面对象，具有层次化的标签命名。
+        
+        Args:
+            rows (int, optional): 棋盘行数，默认为8
+            cols (int, optional): 棋盘列数，默认为8
+            cell_size (float, optional): 单个格子的边长尺寸，默认为0.1
+            Twp (np.ndarray, optional): 棋盘中心在世界坐标系中的位姿矩阵，
+                                       形状为(4, 4)，默认为单位矩阵（原点处）
+            color1 (np.ndarray, optional): 第一种颜色（通常为黑色格子），
+                                         RGB格式，默认为黑色
+            color2 (np.ndarray, optional): 第二种颜色（通常为白色格子），
+                                         RGB格式，默认为白色
+            alpha (float, optional): 透明度，默认为0.8
+            label (str, optional): 棋盘的基础标签，默认为'chessboard'。
+                                 每个格子的标签为'{label}_r{row}_c{col}'
+        
+        Examples:
+            >>> # 创建标准8x8棋盘
+            >>> viewer.add_chessboard_from_Twp()
+            
+            >>> # 创建倾斜的大棋盘
+            >>> import pywayne.vio.SE3 as SE3
+            >>> Twp_tilted = SE3.SE3_exp(np.array([0, 0, 0, 0, np.pi/4, 0]))
+            >>> viewer.add_chessboard_from_Twp(rows=10, cols=10, cell_size=0.2, 
+            ...                               Twp=Twp_tilted, label='big_board')
+            
+            >>> # 创建红蓝配色的棋盘
+            >>> viewer.add_chessboard_from_Twp(color1=np.array([1, 0, 0]),    # 红色
+            ...                               color2=np.array([0, 0, 1]))     # 蓝色
+        
+        Note:
+            - 棋盘以Twp指定的位置为中心对称分布
+            - 格子按照国际象棋标准进行颜色交替（左上角为color1）
+            - 每个格子在Pangolin中有独立的标签，便于单独操作
+        """
+        if Twp is None:
+            Twp = np.eye(4)
+        else:
+            Twp = Twp.astype(np.float32)
+            
+        if color1 is None:
+            color1 = Colors.BLACK
+        if color2 is None:
+            color2 = Colors.WHITE
+        
+        # 提取旋转矩阵和平移向量
+        Rwp = Twp[:3, :3]
+        twp = Twp[:3, 3]
+        
+        for row in range(rows):
+            for col in range(cols):
+                # 计算每个格子在棋盘局部坐标系中的偏移
+                col_offset = (col - (cols - 1) / 2) * cell_size
+                row_offset = (row - (rows - 1) / 2) * cell_size
+                local_translation = np.array([col_offset, row_offset, 0], dtype=np.float32)
+                
+                # 创建格子的局部变换矩阵（只有平移，没有旋转）
+                T_local = np.eye(4, dtype=np.float32)
+                T_local[:3, 3] = local_translation
+                
+                # 计算格子在世界坐标系中的变换矩阵
+                Twp_rc = Twp @ T_local
+                
+                # 选择颜色（棋盘模式）
+                color = color1 if (row + col) % 2 == 0 else color2
+                
+                # 添加格子
+                cell_label = f"{label}_r{row}_c{col}"
+                self.add_plane_from_Twp(Twp_rc, cell_size/2, color=color, alpha=alpha, label=cell_label)
         
     # Line API
     def clear_all_lines(self):
@@ -517,6 +626,19 @@ if __name__ == '__main__':
             alpha=0.6,
             label="y_normal_plane"
         )
+
+        viewer.add_plane_from_Twp(
+            Twp=np.array([
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 2.0],
+                [0.0, 0.0, 0.0, 1.0]
+            ]),
+            size=0.8,
+            color=Colors.GREEN,
+            alpha=0.6,
+            label="y_normal_plane"
+        )
         
         # 添加一条从原点指向动态位置的粗黄色直线
         line_end_point = np.array([np.sin(frame_count * 0.05) * 1.5, 
@@ -535,6 +657,17 @@ if __name__ == '__main__':
             normal=np.array([0.0, 0.0, -1.0], dtype=np.float32),
             alpha=0.8,
             label="colored_chessboard"
+        )
+
+        viewer.add_chessboard_from_Twp(
+            rows=8,
+            cols=8,
+            cell_size=0.1,
+            Twp=np.eye(4),
+            color1=np.array([0, 0, 0]),
+            color2=np.array([255, 255, 255]),
+            alpha=0.8,
+            label="chessboard"
         )
         
         # 7. 更新和显示图像 (使用新 API)

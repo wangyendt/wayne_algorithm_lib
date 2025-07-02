@@ -1,9 +1,9 @@
-Pangolin 查看器 (pangolin)
-============================
+Pangolin 工具 (pangolin_utils)
+========================
 
-.. automodule:: pywayne.visualization.pangolin
+.. automodule:: pywayne.visualization.pangolin_utils
 
-.. autoclass:: pywayne.visualization.pangolin.PangolinViewer
+.. autoclass:: pywayne.visualization.pangolin_utils.PangolinViewer
    :members:
    :undoc-members:
    :show-inheritance:
@@ -55,6 +55,8 @@ Pangolin 查看器 (pangolin)
      - `add_plane_normal_center(normal, center, size, color, alpha, label)`
    - **棋盘 API**:
      - `add_chessboard(rows, cols, cell_size, origin, normal, color1, color2, alpha, label)`
+- `add_plane_from_Twp(Twp, size, color, alpha, label)`: 通过变换矩阵添加平面
+- `add_chessboard_from_Twp(rows, cols, cell_size, Twp, color1, color2, alpha, label)`: 通过变换矩阵添加棋盘
    - **直线 API**:
      - `clear_all_lines()`
      - `add_line(start_point, end_point, color, line_width, label)`
@@ -71,12 +73,12 @@ Pangolin 查看器 (pangolin)
    **示例**::
 
       >>> import numpy as np
-      >>> from pywayne.visualization import pangolin
-      >>> from pywayne.visualization.pangolin import Colors # Import Colors class
+      >>> from pywayne.visualization import pangolin_utils
+      >>> from pywayne.visualization.pangolin_utils import Colors # Import Colors class
       >>> import time
       >>> 
       >>> # 创建 Pangolin 查看器
-      >>> viewer = pangolin.PangolinViewer(800, 600)
+      >>> viewer = pangolin_utils.PangolinViewer(800, 600)
       >>> viewer.init()
       >>> 
       >>> # 准备数据
@@ -161,8 +163,6 @@ Pangolin 查看器 (pangolin)
       >>> viewer.join() # Wait for window to be closed manually
       >>> # viewer.close() # Or close programmatically
 
---------------------------------------------------
-
 通过上述示例，用户可以快速掌握 visualization 模块中 PangolinViewer 类的主要功能，并将其应用于机器人、计算机视觉等领域中的 3D 数据实时展示和交互控制。 
 
 棋盘 API 详细说明
@@ -212,4 +212,66 @@ Pangolin 查看器 (pangolin)
       ...     rows=5, cols=5, cell_size=0.08,
       ...     color1=Colors.BLUE, color2=Colors.ORANGE,
       ...     alpha=0.7, label="decoration"
+      ... )
+
+变换矩阵 API 详细说明
+----------------------
+
+   **add_plane_from_Twp() 方法**:
+
+   用于通过4x4变换矩阵添加3D平面，提供精确的位置和朝向控制。
+
+   **参数**:
+     - `Twp` (numpy.ndarray): 平面在世界坐标系中的位姿矩阵，形状为(4, 4)
+     - `size` (float): 平面的半尺寸（从中心到边缘的距离）
+     - `color` (numpy.ndarray, 可选): 平面颜色，RGB格式，默认为灰色
+     - `alpha` (float, 可选): 透明度，默认为0.5
+     - `label` (str, 可选): 平面标签，默认为空字符串
+
+   **示例**::
+
+      >>> # 使用单位矩阵创建平面
+      >>> Twp = np.eye(4, dtype=np.float32)
+      >>> viewer.add_plane_from_Twp(Twp, size=1.0)
+      >>> 
+      >>> # 使用SE3变换创建倾斜平面  
+      >>> import pywayne.vio.SE3 as SE3
+      >>> Twp = SE3.SE3_exp(np.array([1, 0, 0.5, 0, np.pi/4, 0]))
+      >>> viewer.add_plane_from_Twp(Twp, size=0.8, color=Colors.GREEN)
+
+   **add_chessboard_from_Twp() 方法**:
+
+   用于通过4x4变换矩阵添加3D棋盘，提供精确的位置和朝向控制。
+
+   **参数**:
+     - `rows` (int, 默认=8): 棋盘行数
+     - `cols` (int, 默认=8): 棋盘列数
+     - `cell_size` (float, 默认=0.1): 单个格子的边长
+     - `Twp` (numpy.ndarray, 可选): 棋盘位姿矩阵，默认为单位矩阵
+     - `color1` (numpy.ndarray, 可选): 第一种颜色，默认为黑色
+     - `color2` (numpy.ndarray, 可选): 第二种颜色，默认为白色
+     - `alpha` (float, 默认=0.8): 透明度
+     - `label` (str, 默认="chessboard"): 标签前缀
+
+   **示例**::
+
+      >>> # 标准位置棋盘
+      >>> viewer.add_chessboard_from_Twp()
+      >>> 
+      >>> # 精确定位的标定棋盘
+      >>> Twp = np.eye(4, dtype=np.float32)
+      >>> Twp[:3, 3] = [0.5, 0.3, 1.0]  # 设置位置
+      >>> viewer.add_chessboard_from_Twp(
+      ...     rows=9, cols=6, cell_size=0.025,
+      ...     Twp=Twp, label="calibration"
+      ... )
+      >>> 
+      >>> # 旋转的彩色棋盘
+      >>> import pywayne.vio.SE3 as SE3
+      >>> Twp_tilted = SE3.SE3_exp(np.array([0, 0, 0, 0, np.pi/4, np.pi/6]))
+      >>> viewer.add_chessboard_from_Twp(
+      ...     rows=6, cols=6, cell_size=0.08,
+      ...     Twp=Twp_tilted,
+      ...     color1=Colors.RED, color2=Colors.BLUE,
+      ...     label="tilted_board"
       ... ) 

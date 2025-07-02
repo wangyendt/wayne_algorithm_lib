@@ -9,5 +9,6 @@
 
 
 __all__ = [
-    'pangolin',
+    'pangolin_utils',
+    'rerun_utils'
 ]
