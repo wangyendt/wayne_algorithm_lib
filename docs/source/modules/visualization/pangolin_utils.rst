@@ -1,5 +1,5 @@
 Pangolin 工具 (pangolin_utils)
-========================
+===============================
 
 .. automodule:: pywayne.visualization.pangolin_utils
 
@@ -55,8 +55,8 @@ Pangolin 工具 (pangolin_utils)
      - `add_plane_normal_center(normal, center, size, color, alpha, label)`
    - **棋盘 API**:
      - `add_chessboard(rows, cols, cell_size, origin, normal, color1, color2, alpha, label)`
-- `add_plane_from_Twp(Twp, size, color, alpha, label)`: 通过变换矩阵添加平面
-- `add_chessboard_from_Twp(rows, cols, cell_size, Twp, color1, color2, alpha, label)`: 通过变换矩阵添加棋盘
+     - `add_plane_from_Twp(Twp, size, color, alpha, label)`: 通过变换矩阵添加平面
+     - `add_chessboard_from_Twp(rows, cols, cell_size, Twp, color1, color2, alpha, label)`: 通过变换矩阵添加棋盘
    - **直线 API**:
      - `clear_all_lines()`
      - `add_line(start_point, end_point, color, line_width, label)`
