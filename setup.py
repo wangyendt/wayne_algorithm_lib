@@ -40,6 +40,8 @@ core_reqs = [
     "filelock",
     "pyyaml",
     "requests",
+    "websockets",
+    "python-dotenv"
 ]
 
 # 定义可选依赖

@@ -96,6 +96,7 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
 
    modules/adb
    modules/aliyun_oss
+   modules/cross_comm
    modules/llm
    modules/lark_bot
    modules/lark_bot_listener

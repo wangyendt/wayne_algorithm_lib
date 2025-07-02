@@ -17,6 +17,7 @@ __all__ = [
     'tts',
     'aliyun_oss',
     'helper',
+    'cross_comm',
     # 'tt_api',
     # 'ocs_api',
 ]

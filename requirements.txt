@@ -30,3 +30,6 @@ gtts
 lark_oapi
 
 statsmodels
+
+websockets
+python-dotenv
