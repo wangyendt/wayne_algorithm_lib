@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any, Union, Tuple
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
+from enum import Enum
 import websockets
 from websockets.server import WebSocketServerProtocol
 from websockets.client import WebSocketClientProtocol
@@ -30,22 +31,47 @@ from pywayne.aliyun_oss import OssManager
 # 加载环境变量
 load_dotenv()
 
+# 导出的公共接口
+__all__ = ['CrossCommService', 'Message', 'CommMsgType']
+
+class CommMsgType(Enum):
+    """消息类型枚举"""
+    TEXT = "text"
+    JSON = "json"
+    DICT = "dict"
+    BYTES = "bytes"
+    IMAGE = "image"
+    FILE = "file"
+    FOLDER = "folder"
+    HEARTBEAT = "heartbeat"
+    LOGIN = "login"
+    LOGOUT = "logout"
+    LIST_CLIENTS = "list_clients"
+    LIST_CLIENTS_RESPONSE = "list_clients_response"
+    LOGIN_RESPONSE = "login_response"
+
 @dataclass
 class Message:
     """消息结构体"""
     msg_id: str
     from_client_id: str
     to_client_id: str  # "all" 表示发送给所有在线客户端
-    msg_type: str  # "text", "json", "dict", "bytes", "image", "file", "folder", "heartbeat", "login", "logout", "list_clients", "list_clients_response"
+    msg_type: CommMsgType  # 使用枚举类型
     content: Any
     timestamp: float
     oss_key: Optional[str] = None  # 用于文件传输
 
     def to_dict(self) -> Dict:
-        return asdict(self)
+        data = asdict(self)
+        # 将枚举转换为字符串值用于JSON序列化
+        data['msg_type'] = self.msg_type.value
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'Message':
+        # 将字符串转换回枚举
+        if isinstance(data['msg_type'], str):
+            data['msg_type'] = CommMsgType(data['msg_type'])
         return cls(**data)
 
 class CrossCommService:
@@ -103,13 +129,31 @@ class CrossCommService:
             self.is_connected = False
             self.heartbeat_task = None
             
-        # 消息监听器
-        self.message_handlers: List[Callable] = []
+        # 消息监听器（存储处理器及其配置）
+        self.message_handlers: List[Dict[str, Any]] = []
         
         # 客户端列表缓存
         self._last_client_list = None
         
         wayne_print(f"CrossCommService initialized: role={role}, client_id={self.client_id}", 'green')
+    
+    def download_file_manually(self, oss_key: str, save_path: str) -> bool:
+        """
+        手动下载文件
+        
+        Args:
+            oss_key: OSS中的文件key
+            save_path: 保存路径
+            
+        Returns:
+            是否下载成功
+        """
+        if oss_key.endswith('/'):
+            # 这是一个文件夹
+            return self._download_folder_from_oss(oss_key, save_path)
+        else:
+            # 这是一个文件
+            return self._download_file_from_oss(oss_key, save_path)
     
     def _load_clients_config(self):
         """加载客户端配置"""
@@ -134,71 +178,51 @@ class CrossCommService:
         """生成消息ID"""
         return f"{self.client_id}_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
     
-    def _detect_message_type(self, content: Any) -> Tuple[str, Optional[str]]:
+    def _upload_file_for_message(self, content: Any, msg_type: CommMsgType) -> Tuple[Any, Optional[str]]:
         """
-        智能检测消息类型
+        根据消息类型处理文件上传
         
         Args:
             content: 消息内容
+            msg_type: 消息类型
             
         Returns:
-            Tuple[消息类型, OSS_KEY（如果是文件类型）]
+            Tuple[处理后的内容, OSS_KEY（如果是文件类型）]
         """
         oss_key = None
         
-        # 1. 首先检查是否是文件或文件夹路径
-        if isinstance(content, (str, Path)):
-            content_str = str(content)
-            
-            # 检查是否是存在的文件或文件夹
-            if os.path.exists(content_str):
-                if os.path.isfile(content_str):
-                    # 检查是否是图片文件
-                    img_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif'}
-                    if Path(content_str).suffix.lower() in img_extensions:
-                        msg_type = 'image'
+        if msg_type in [CommMsgType.FILE, CommMsgType.IMAGE, CommMsgType.FOLDER]:
+            if isinstance(content, (str, Path)):
+                content_str = str(content)
+                
+                # 检查文件或文件夹是否存在
+                if os.path.exists(content_str):
+                    if msg_type == CommMsgType.FOLDER and os.path.isdir(content_str):
+                        # 上传文件夹到OSS
+                        oss_key = self._upload_folder_to_oss(content_str)
+                        if not oss_key:
+                            wayne_print("上传文件夹到OSS失败", 'red')
+                            return content, None
+                    elif msg_type in [CommMsgType.FILE, CommMsgType.IMAGE] and os.path.isfile(content_str):
+                        # 上传文件到OSS
+                        oss_key = self._upload_file_to_oss(content_str)
+                        if not oss_key:
+                            wayne_print("上传文件到OSS失败", 'red')
+                            return content, None
                     else:
-                        msg_type = 'file'
-                    
-                    # 上传文件到OSS
-                    oss_key = self._upload_file_to_oss(content_str)
-                    if not oss_key:
-                        wayne_print("上传文件到OSS失败", 'red')
-                        # 如果上传失败，回退到文本类型
-                        return 'text', None
-                    
-                    return msg_type, oss_key
-                    
-                elif os.path.isdir(content_str):
-                    # 上传文件夹到OSS
-                    oss_key = self._upload_folder_to_oss(content_str)
-                    if not oss_key:
-                        wayne_print("上传文件夹到OSS失败", 'red')
-                        # 如果上传失败，回退到文本类型
-                        return 'text', None
-                    
-                    return 'folder', oss_key
+                        wayne_print(f"指定的消息类型 {msg_type.value} 与内容类型不匹配", 'red')
+                        return content, None
+                else:
+                    wayne_print(f"文件或文件夹不存在: {content_str}", 'red')
+                    return content, None
+                
+                # 保存原始路径作为内容
+                return content_str, oss_key
+            else:
+                wayne_print(f"消息类型 {msg_type.value} 需要文件路径字符串", 'red')
+                return content, None
         
-        # 2. 检查字典类型
-        if isinstance(content, dict):
-            return 'dict', None
-        
-        # 3. 检查字节类型
-        if isinstance(content, (bytes, bytearray)):
-            return 'bytes', None
-        
-        # 4. 检查字符串类型（JSON或普通文本）
-        if isinstance(content, str):
-            # 检查是否是有效的JSON字符串
-            try:
-                json.loads(content)
-                return 'json', None
-            except (json.JSONDecodeError, ValueError):
-                # 不是有效JSON，归类为文本
-                return 'text', None
-        
-        # 5. 其他类型都转换为文本
-        return 'text', None
+        return content, oss_key
     
     def _upload_file_to_oss(self, file_path: str) -> Optional[str]:
         """上传文件到OSS"""
@@ -247,10 +271,16 @@ class CrossCommService:
             wayne_print(f"从OSS下载文件夹失败: {e}", 'red')
             return False
     
-    async def _handle_message(self, message: Message):
-        """处理接收到的消息"""
+    async def _handle_message(self, message: Message, download_directory: Optional[str] = None):
+        """
+        处理接收到的消息
+        
+        Args:
+            message: 消息对象
+            download_directory: 指定的下载目录（用于文件类型消息）
+        """
         # 处理字节数组消息的解码
-        if message.msg_type == 'bytes' and isinstance(message.content, str):
+        if message.msg_type == CommMsgType.BYTES and isinstance(message.content, str):
             try:
                 import base64
                 message.content = base64.b64decode(message.content.encode('utf-8'))
@@ -258,7 +288,23 @@ class CrossCommService:
                 wayne_print(f"解码字节消息失败: {e}", 'red')
         
         # 调用所有注册的消息处理器
-        for handler in self.message_handlers:
+        for handler_info in self.message_handlers:
+            handler = handler_info['handler']
+            handler_msg_type = handler_info.get('msg_type')
+            handler_from_client_id = handler_info.get('from_client_id')
+            
+            # 过滤消息来源（不处理自己发送的消息）
+            if message.from_client_id == self.client_id:
+                continue
+            
+            # 过滤消息类型
+            if handler_msg_type and message.msg_type != handler_msg_type:
+                continue
+            
+            # 过滤发送方
+            if handler_from_client_id and message.from_client_id != handler_from_client_id:
+                continue
+            
             try:
                 await handler(message)
             except Exception as e:
@@ -276,7 +322,7 @@ class CrossCommService:
                     data = json.loads(message_data)
                     message = Message.from_dict(data)
                     
-                    if message.msg_type == 'login':
+                    if message.msg_type == CommMsgType.LOGIN:
                         client_id = message.from_client_id
                         current_time = time.time()
                         self.clients[client_id] = {
@@ -293,23 +339,23 @@ class CrossCommService:
                             msg_id=self._generate_msg_id(),
                             from_client_id='server',
                             to_client_id=client_id,
-                            msg_type='login_response',
+                            msg_type=CommMsgType.LOGIN_RESPONSE,
                             content={'status': 'success'},
                             timestamp=time.time()
                         )
                         await websocket.send(json.dumps(response.to_dict()))
                     
-                    elif message.msg_type == 'logout':
+                    elif message.msg_type == CommMsgType.LOGOUT:
                         if client_id and client_id in self.clients:
                             self.clients[client_id]['status'] = 'offline'
                             self._save_clients_config()
                             wayne_print(f"客户端 {client_id} 已登出", 'yellow')
                     
-                    elif message.msg_type == 'heartbeat':
+                    elif message.msg_type == CommMsgType.HEARTBEAT:
                         if client_id and client_id in self.clients:
                             self.clients[client_id]['last_heartbeat'] = time.time()
                     
-                    elif message.msg_type == 'list_clients':
+                    elif message.msg_type == CommMsgType.LIST_CLIENTS:
                         # 处理客户端列表请求
                         await self._handle_list_clients_request(message, websocket)
                     
@@ -386,7 +432,7 @@ class CrossCommService:
                 msg_id=str(uuid.uuid4()),
                 from_client_id='server',
                 to_client_id=message.from_client_id,
-                msg_type='list_clients_response',
+                msg_type=CommMsgType.LIST_CLIENTS_RESPONSE,
                 content=json.dumps({
                     'clients': client_list,
                     'total_count': len(client_list),
@@ -461,12 +507,12 @@ class CrossCommService:
                     message = Message.from_dict(data)
                     
                     # 处理客户端列表响应
-                    if message.msg_type == 'list_clients_response':
+                    if message.msg_type == CommMsgType.LIST_CLIENTS_RESPONSE:
                         self._handle_list_clients_response(message)
                         continue
                     
                     # 处理文件下载
-                    if message.msg_type in ['file', 'folder', 'image'] and message.oss_key:
+                    if message.msg_type in [CommMsgType.FILE, CommMsgType.FOLDER, CommMsgType.IMAGE] and message.oss_key:
                         await self._handle_file_message(message)
                     else:
                         await self._handle_message(message)
@@ -482,34 +528,79 @@ class CrossCommService:
     async def _handle_file_message(self, message: Message):
         """处理文件消息"""
         try:
-            # 创建临时目录
-            temp_dir = Path(tempfile.gettempdir()) / "cross_comm" / self.client_id
-            temp_dir.mkdir(parents=True, exist_ok=True)
+            # 查找是否有匹配的处理器设置了下载目录
+            download_directory = None
+            for handler_info in self.message_handlers:
+                handler_msg_type = handler_info.get('msg_type')
+                handler_from_client_id = handler_info.get('from_client_id')
+                
+                # 过滤消息来源（不处理自己发送的消息）
+                if message.from_client_id == self.client_id:
+                    continue
+                
+                # 检查是否匹配消息类型和发送方
+                if handler_msg_type and message.msg_type != handler_msg_type:
+                    continue
+                
+                if handler_from_client_id and message.from_client_id != handler_from_client_id:
+                    continue
+                
+                # 找到匹配的处理器，获取其下载目录
+                download_directory = handler_info.get('download_directory')
+                if download_directory:
+                    break
             
-            if message.msg_type == 'file' or message.msg_type == 'image':
+            # 如果没有找到设置下载目录的处理器，直接传递消息
+            if not download_directory:
+                wayne_print(f"收到文件消息但没有处理器设置下载目录，不下载: {message.oss_key}", 'yellow')
+                await self._handle_message(message)
+                return
+            
+            # 创建下载目录
+            download_dir = Path(download_directory)
+            download_dir.mkdir(parents=True, exist_ok=True)
+            
+            if message.msg_type == CommMsgType.FILE or message.msg_type == CommMsgType.IMAGE:
                 # 下载文件
                 file_name = Path(message.oss_key).name
-                save_path = temp_dir / file_name
+                save_path = download_dir / file_name
+                
+                # 如果文件已存在，添加时间戳避免覆盖
+                if save_path.exists():
+                    timestamp = int(time.time())
+                    stem = save_path.stem
+                    suffix = save_path.suffix
+                    save_path = download_dir / f"{stem}_{timestamp}{suffix}"
+                
                 if self._download_file_from_oss(message.oss_key, str(save_path)):
                     # 更新消息内容为本地文件路径
                     message.content = str(save_path)
-                    await self._handle_message(message)
+                    await self._handle_message(message, download_directory)
+                    wayne_print(f"下载文件成功: {message.oss_key} -> {save_path}", 'green')
                 else:
                     wayne_print(f"下载文件失败: {message.oss_key}", 'red')
+                    # 即使下载失败，也传递原始消息，让用户知道有文件消息
+                    await self._handle_message(message, download_directory)
             
-            elif message.msg_type == 'folder':
+            elif message.msg_type == CommMsgType.FOLDER:
                 # 下载文件夹
                 folder_name = f"folder_{int(time.time())}"
-                save_path = temp_dir / folder_name
+                save_path = download_dir / folder_name
+                
                 if self._download_folder_from_oss(message.oss_key, str(save_path)):
                     # 更新消息内容为本地文件夹路径
                     message.content = str(save_path)
-                    await self._handle_message(message)
+                    await self._handle_message(message, download_directory)
+                    wayne_print(f"下载文件夹成功: {message.oss_key} -> {save_path}", 'green')
                 else:
                     wayne_print(f"下载文件夹失败: {message.oss_key}", 'red')
+                    # 即使下载失败，也传递原始消息，让用户知道有文件夹消息
+                    await self._handle_message(message, download_directory)
                     
         except Exception as e:
             wayne_print(f"处理文件消息时出错: {e}", 'red')
+            # 发生异常时也传递原始消息
+            await self._handle_message(message)
     
     def _handle_list_clients_response(self, message: Message):
         """处理客户端列表响应"""
@@ -528,7 +619,7 @@ class CrossCommService:
                     msg_id=self._generate_msg_id(),
                     from_client_id=self.client_id,
                     to_client_id='server',
-                    msg_type='heartbeat',
+                    msg_type=CommMsgType.HEARTBEAT,
                     content={},
                     timestamp=time.time()
                 )
@@ -554,7 +645,7 @@ class CrossCommService:
                 msg_id=self._generate_msg_id(),
                 from_client_id=self.client_id,
                 to_client_id='server',
-                msg_type='login',
+                msg_type=CommMsgType.LOGIN,
                 content={},
                 timestamp=time.time()
             )
@@ -585,7 +676,7 @@ class CrossCommService:
                     msg_id=self._generate_msg_id(),
                     from_client_id=self.client_id,
                     to_client_id='server',
-                    msg_type='logout',
+                    msg_type=CommMsgType.LOGOUT,
                     content={},
                     timestamp=time.time()
                 )
@@ -604,15 +695,15 @@ class CrossCommService:
             except Exception as e:
                 wayne_print(f"登出时出错: {e}", 'red')
     
-    async def send_message(self, content: Any, to_client_id: str = 'all', 
-                          msg_type: str = 'auto') -> bool:
+    async def send_message(self, content: Any, msg_type: CommMsgType, 
+                          to_client_id: str = 'all') -> bool:
         """
         发送消息
         
         Args:
             content: 消息内容
+            msg_type: 消息类型（必须指定）
             to_client_id: 目标客户端ID，'all'表示发送给所有在线客户端
-            msg_type: 消息类型，'auto'表示自动检测
         """
         if self.role != 'client':
             raise ValueError("只有客户端角色才能发送消息")
@@ -622,25 +713,30 @@ class CrossCommService:
             return False
         
         try:
-            oss_key = None
+            # 根据消息类型处理内容和文件上传
+            processed_content, oss_key = self._upload_file_for_message(content, msg_type)
             
-            # 自动检测消息类型，优先检测文件类型
-            if msg_type == 'auto':
-                msg_type, oss_key = self._detect_message_type(content)
-                
-                if msg_type in ['file', 'image', 'folder'] and oss_key:
-                    content = str(content)  # 保存原始路径作为内容
-                elif msg_type == 'bytes' and isinstance(content, (bytes, bytearray)):
-                    # 将字节数组转换为base64字符串以便JSON序列化
-                    import base64
-                    content = base64.b64encode(content).decode('utf-8')
-                elif msg_type == 'text' and not isinstance(content, str):
-                    content = str(content)
-            
-            # 对于手动指定的字节类型，也需要转换
-            if msg_type == 'bytes' and isinstance(content, (bytes, bytearray)):
+            # 对于字节类型，需要转换为base64字符串以便JSON序列化
+            if msg_type == CommMsgType.BYTES and isinstance(processed_content, (bytes, bytearray)):
                 import base64
-                content = base64.b64encode(content).decode('utf-8')
+                processed_content = base64.b64encode(processed_content).decode('utf-8')
+            elif msg_type == CommMsgType.TEXT and not isinstance(processed_content, str):
+                # 对于文本类型，确保内容是字符串
+                processed_content = str(processed_content)
+            elif msg_type == CommMsgType.JSON and isinstance(processed_content, str):
+                # 验证JSON格式
+                try:
+                    json.loads(processed_content)
+                except (json.JSONDecodeError, ValueError):
+                    wayne_print("指定为JSON类型但内容不是有效的JSON格式", 'red')
+                    return False
+            elif msg_type == CommMsgType.JSON and not isinstance(processed_content, str):
+                # 将非字符串内容转换为JSON字符串
+                try:
+                    processed_content = json.dumps(processed_content)
+                except Exception as e:
+                    wayne_print(f"无法将内容转换为JSON: {e}", 'red')
+                    return False
             
             # 创建消息
             message = Message(
@@ -648,21 +744,21 @@ class CrossCommService:
                 from_client_id=self.client_id,
                 to_client_id=to_client_id,
                 msg_type=msg_type,
-                content=content,
+                content=processed_content,
                 timestamp=time.time(),
                 oss_key=oss_key
             )
             
             # 发送消息
             await self.websocket.send(json.dumps(message.to_dict()))
-            wayne_print(f"消息已发送: {msg_type} -> {to_client_id}", 'green')
+            wayne_print(f"消息已发送: {msg_type.value} -> {to_client_id}", 'green')
             return True
             
         except Exception as e:
             wayne_print(f"发送消息失败: {e}", 'red')
             return False
     
-    async def list_clients(self, only_show_online: bool = False, timeout: float = 5.0) -> Optional[dict]:
+    async def list_clients(self, only_show_online: bool = True, timeout: float = 5.0) -> Optional[dict]:
         """
         获取服务器上的客户端列表
         
@@ -702,7 +798,7 @@ class CrossCommService:
                 msg_id=self._generate_msg_id(),
                 from_client_id=self.client_id,
                 to_client_id='server',
-                msg_type='list_clients',
+                msg_type=CommMsgType.LIST_CLIENTS,
                 content=json.dumps({'only_show_online': only_show_online}),
                 timestamp=time.time()
             )
@@ -726,38 +822,39 @@ class CrossCommService:
     
     # ========== 装饰器方法 ==========
     
-    def message_listener(self, msg_type: Optional[str] = None, 
-                        from_client_id: Optional[str] = None):
+    def message_listener(self, msg_type: Optional[CommMsgType] = None, 
+                        from_client_id: Optional[str] = None,
+                        download_directory: Optional[str] = None):
         """
         消息监听装饰器
         
         Args:
             msg_type: 监听的消息类型，None表示监听所有类型
             from_client_id: 监听特定发送方的消息，None表示监听所有发送方
+            download_directory: 文件下载目录，仅对文件类型消息有效（FILE, IMAGE, FOLDER）
         """
         def decorator(func: Callable):
             @functools.wraps(func)
             async def wrapper(message: Message):
-                # 过滤消息来源（不处理自己发送的消息）
-                if message.from_client_id == self.client_id:
-                    return
-                
-                # 过滤消息类型
-                if msg_type and message.msg_type != msg_type:
-                    return
-                
-                # 过滤发送方
-                if from_client_id and message.from_client_id != from_client_id:
-                    return
-                
                 # 调用用户处理函数
                 try:
                     await func(message)
                 except Exception as e:
                     wayne_print(f"消息处理函数执行错误: {e}", 'red')
             
-            # 注册消息处理器
-            self.message_handlers.append(wrapper)
+            # 注册消息处理器配置
+            handler_info = {
+                'handler': wrapper,
+                'msg_type': msg_type,
+                'from_client_id': from_client_id,
+                'download_directory': download_directory
+            }
+            self.message_handlers.append(handler_info)
+            
+            # 如果设置了下载目录，打印提示信息
+            if download_directory and msg_type in [CommMsgType.FILE, CommMsgType.IMAGE, CommMsgType.FOLDER]:
+                wayne_print(f"已为 {msg_type.value} 类型消息设置下载目录: {download_directory}", 'cyan')
+            
             return wrapper
         
         return decorator
@@ -805,21 +902,66 @@ if __name__ == '__main__':
         wayne_print(f"客户端ID: {client.client_id}", 'cyan')
         
         # 注册消息监听器
-        @client.message_listener(msg_type='text')
+        @client.message_listener(msg_type=CommMsgType.TEXT)
         async def handle_text_message(message: Message):
             wayne_print(f"收到文本消息: {message.content}", 'green')
             wayne_print(f"来自: {message.from_client_id}", 'white')
             wayne_print(f"时间: {message.timestamp}", 'white')
         
-        @client.message_listener(msg_type='file')
+        # 为文件类型消息指定下载目录
+        @client.message_listener(msg_type=CommMsgType.FILE, download_directory="./downloads/files")
         async def handle_file_message(message: Message):
-            wayne_print(f"收到文件: {message.content}", 'yellow')
-            wayne_print(f"来自: {message.from_client_id}", 'white')
             # message.content 包含下载后的本地文件路径
+            wayne_print(f"收到文件并已下载: {message.content}", 'yellow')
+            wayne_print(f"来自: {message.from_client_id}", 'white')
+            
+            # 可以直接使用本地文件
+            try:
+                with open(message.content, 'r', encoding='utf-8') as f:
+                    file_content = f.read()[:100]  # 只读取前100个字符
+                    wayne_print(f"文件内容预览: {file_content}...", 'white')
+            except Exception as e:
+                wayne_print(f"读取文件内容失败: {e}", 'red')
+        
+        # 为图片类型消息指定下载目录
+        @client.message_listener(msg_type=CommMsgType.IMAGE, download_directory="./downloads/images")
+        async def handle_image_message(message: Message):
+            wayne_print(f"收到图片并已下载: {message.content}", 'cyan')
+            wayne_print(f"来自: {message.from_client_id}", 'white')
+            
+            # 可以进一步处理图片文件
+            file_size = Path(message.content).stat().st_size
+            wayne_print(f"图片大小: {file_size} 字节", 'white')
+        
+        # 为文件夹类型消息指定下载目录
+        @client.message_listener(msg_type=CommMsgType.FOLDER, download_directory="./downloads/folders")
+        async def handle_folder_message(message: Message):
+            wayne_print(f"收到文件夹并已下载: {message.content}", 'magenta')
+            wayne_print(f"来自: {message.from_client_id}", 'white')
+            
+            # 列出文件夹内容
+            try:
+                folder_path = Path(message.content)
+                files = list(folder_path.iterdir())
+                wayne_print(f"文件夹包含 {len(files)} 个项目", 'white')
+            except Exception as e:
+                wayne_print(f"读取文件夹内容失败: {e}", 'red')
+        
+        # 不设置下载目录的处理器 - 不会自动下载文件
+        @client.message_listener(msg_type=CommMsgType.FILE, from_client_id="special_client")
+        async def handle_special_file_message(message: Message):
+            # 不会自动下载，只显示消息信息
+            wayne_print(f"收到特殊客户端的文件消息: {message.content}", 'yellow')
+            wayne_print(f"OSS Key: {message.oss_key}", 'white')
+            
+            # 可以选择手动下载
+            # success = client.download_file_manually(message.oss_key, "special_file.txt")
+            # if success:
+            #     wayne_print("文件下载成功", 'green')
         
         @client.message_listener()  # 监听所有消息类型
         async def handle_all_messages(message: Message):
-            wayne_print(f"[通用处理器] {message.msg_type}: {message.content}", 'white')
+            wayne_print(f"[通用处理器] {message.msg_type.value}: {message.content}", 'white')
         
         try:
             # 连接到服务器
@@ -833,28 +975,28 @@ if __name__ == '__main__':
             # 发送各种类型的消息
             
             # 1. 发送文本消息给所有在线客户端
-            await client.send_message("Hello everyone!")
+            await client.send_message("Hello everyone!", CommMsgType.TEXT)
             
             # 2. 发送JSON消息
-            await client.send_message('{"type": "notification", "data": "test"}')
+            await client.send_message('{"type": "notification", "data": "test"}', CommMsgType.JSON)
             
             # 3. 发送字典消息
-            await client.send_message({"action": "update", "id": 123})
+            await client.send_message({"action": "update", "id": 123}, CommMsgType.DICT)
             
             # 4. 发送字节数据
-            await client.send_message(b"Binary data")
+            await client.send_message(b"Binary data", CommMsgType.BYTES)
             
             # 5. 发送文件（会自动上传到OSS）
-            # await client.send_message("/path/to/your/file.txt")
+            # await client.send_message("/path/to/your/file.txt", CommMsgType.FILE)
             
             # 6. 发送图片（会自动上传到OSS）
-            # await client.send_message("/path/to/your/image.png")
+            # await client.send_message("/path/to/your/image.png", CommMsgType.IMAGE)
             
             # 7. 发送文件夹（会自动上传到OSS）
-            # await client.send_message("/path/to/your/folder")
+            # await client.send_message("/path/to/your/folder", CommMsgType.FOLDER)
             
             # 8. 发送给指定客户端
-            # await client.send_message("Private message", to_client_id='target_client_id')
+            # await client.send_message("Private message", CommMsgType.TEXT, to_client_id='target_client_id')
             
             # 9. 获取客户端列表
             wayne_print("\\n=== 获取客户端列表示例 ===", 'cyan')
@@ -873,6 +1015,20 @@ if __name__ == '__main__':
                 wayne_print(f"在线客户端数量: {online_clients['total_count']}", 'green')
                 for client_info in online_clients['clients']:
                     wayne_print(f"  - {client_info['client_id']}: {client_info['status']}", 'green')
+            
+            # 10. 文件下载控制示例
+            wayne_print("\\n=== 文件下载控制示例 ===", 'cyan')
+            wayne_print("文件下载目录现在在消息监听器装饰器中指定：", 'white')
+            wayne_print("- 指定下载目录的处理器会自动下载文件", 'white')
+            wayne_print("- 不指定下载目录的处理器不会自动下载，节省流量", 'white')
+            wayne_print("- 可以为不同类型的文件设置不同的下载目录", 'white')
+            
+            # 手动下载文件示例（适用于没有设置下载目录的处理器）
+            # success = client.download_file_manually("oss_key", "本地保存路径")
+            # if success:
+            #     wayne_print("文件下载成功", 'green')
+            # else:
+            #     wayne_print("文件下载失败", 'red')
             
             # 保持连接
             while client.is_connected:
