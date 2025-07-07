@@ -94,18 +94,23 @@ CrossCommService 类详细说明
       - 字节类型消息会自动进行base64编码
       - JSON类型消息会验证JSON格式的有效性
 
-   .. py:method:: download_file_manually(oss_key: str, save_path: str) -> bool
+   .. py:method:: download_file_manually(oss_key: str, save_directory: str) -> bool
       
       手动下载文件或文件夹。
       
       **参数**:
       
       - **oss_key**: OSS中的文件键值
-      - **save_path**: 本地保存路径
+      - **save_directory**: 保存目录（OSS管理器会在此目录下重建路径结构）
       
       **返回**:
       
       - 布尔值，表示下载是否成功
+      
+      **注意**:
+      
+      - OSS管理器会在指定目录下重建完整的oss_key路径结构
+      - 例如：oss_key为"cross_comm/client1/file.txt"，save_directory为"./downloads"，则文件会保存为"./downloads/cross_comm/client1/file.txt"
 
    .. py:method:: message_listener(msg_type: Optional[CommMsgType] = None, from_client_id: Optional[str] = None, download_directory: Optional[str] = None)
       
@@ -314,8 +319,8 @@ Message 类详细说明
            print(f"收到特殊客户端的文件消息: {message.content}")
            print(f"OSS Key: {message.oss_key}")
            
-           # 可以选择手动下载
-           success = client.download_file_manually(message.oss_key, "special_file.txt")
+           # 可以选择手动下载到指定目录
+           success = client.download_file_manually(message.oss_key, "./manual_downloads/")
            if success:
                print("文件下载成功")
        
@@ -412,7 +417,7 @@ Message 类详细说明
        
        # 根据需要手动下载
        if should_download(message):
-           success = client.download_file_manually(message.oss_key, "manual_download.txt")
+           success = client.download_file_manually(message.oss_key, "./manual_downloads/")
            if success:
                print("手动下载成功")
 
@@ -465,11 +470,19 @@ Message 类详细说明
 **文件下载控制**:
 
 - 通过message_listener装饰器的download_directory参数控制下载行为
-- 指定下载目录：自动下载文件到指定目录
+- 指定下载目录：自动下载文件到指定目录，OSS管理器会在目录下重建完整路径结构
 - 不指定下载目录：不自动下载，节省流量和存储空间
 - 支持手动下载：使用download_file_manually方法
 - 可为不同消息类型设置不同下载目录
 - 支持按发送方过滤下载策略
+
+**文件路径结构说明**:
+
+- OSS中文件的完整路径（oss_key）会在本地目录中重建
+- 例如：oss_key为"cross_comm/sender_id/1234567890_abc123.pdf"
+- 指定下载目录为"./downloads/documents"
+- 最终文件路径为"./downloads/documents/cross_comm/sender_id/1234567890_abc123.pdf"
+- 这样保持了OSS中的目录结构，避免文件名冲突
 
 错误处理
 --------

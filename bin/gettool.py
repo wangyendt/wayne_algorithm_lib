@@ -324,8 +324,19 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
                         os.chdir(build_dir_in_tool_src) # CD into .../cv/apriltag_detection/build
                         
                         wayne_print(f"Running CMake in {os.getcwd()} (source: ..)", "magenta")
-                        # Basic CMake command, remove capture_output=True to print log directly
-                        cmake_process = subprocess.run(["cmake", ".."], text=True, check=False)
+                        
+                        # Get python3 executable path
+                        try:
+                            python3_path_result = subprocess.run(["which", "python3"], capture_output=True, text=True, check=True)
+                            python3_path = python3_path_result.stdout.strip()
+                            wayne_print(f"Found python3 at: {python3_path}", "blue")
+                        except subprocess.CalledProcessError:
+                            python3_path = "python3"  # fallback to default
+                            wayne_print("Could not find python3 path, using default 'python3'", "yellow")
+                        
+                        # Basic CMake command with PYTHON_EXECUTABLE
+                        cmake_cmd = ["cmake", f"-DPYTHON_EXECUTABLE={python3_path}", ".."]
+                        cmake_process = subprocess.run(cmake_cmd, text=True, check=False)
                         if cmake_process.returncode != 0:
                             wayne_print(f"CMake failed for {tool_name} with return code {cmake_process.returncode}. Check output above.", "red")
                         else:

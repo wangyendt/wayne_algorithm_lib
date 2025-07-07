@@ -137,23 +137,23 @@ class CrossCommService:
         
         wayne_print(f"CrossCommService initialized: role={role}, client_id={self.client_id}", 'green')
     
-    def download_file_manually(self, oss_key: str, save_path: str) -> bool:
+    def download_file_manually(self, oss_key: str, save_directory: str) -> bool:
         """
         手动下载文件
         
         Args:
             oss_key: OSS中的文件key
-            save_path: 保存路径
+            save_directory: 保存目录（OSS管理器会在此目录下重建路径结构）
             
         Returns:
             是否下载成功
         """
         if oss_key.endswith('/'):
             # 这是一个文件夹
-            return self._download_folder_from_oss(oss_key, save_path)
+            return self._download_folder_from_oss(oss_key, save_directory)
         else:
             # 这是一个文件
-            return self._download_file_from_oss(oss_key, save_path)
+            return self._download_file_from_oss(oss_key, save_directory)
     
     def _load_clients_config(self):
         """加载客户端配置"""
@@ -561,31 +561,34 @@ class CrossCommService:
             download_dir.mkdir(parents=True, exist_ok=True)
             
             if message.msg_type == CommMsgType.FILE or message.msg_type == CommMsgType.IMAGE:
-                # 下载文件
-                file_name = Path(message.oss_key).name
-                save_path = download_dir / file_name
-                
-                # 如果文件已存在，添加时间戳避免覆盖
-                if save_path.exists():
-                    timestamp = int(time.time())
-                    stem = save_path.stem
-                    suffix = save_path.suffix
-                    save_path = download_dir / f"{stem}_{timestamp}{suffix}"
-                
-                if self._download_file_from_oss(message.oss_key, str(save_path)):
+                # 下载文件 - 直接使用download_directory作为目标目录
+                # OSS管理器会在目录下重建完整的oss_key路径结构
+                if self._download_file_from_oss(message.oss_key, str(download_dir)):
+                    # 计算下载后的实际文件路径（OSS管理器会重建路径结构）
+                    actual_file_path = download_dir / message.oss_key
+                    
+                    # 如果文件已存在但有冲突，处理重命名
+                    if not actual_file_path.exists():
+                        # 如果预期路径不存在，说明可能有其他路径结构，尝试找到实际文件
+                        file_name = Path(message.oss_key).name
+                        possible_files = list(download_dir.rglob(file_name))
+                        if possible_files:
+                            actual_file_path = possible_files[0]
+                    
                     # 更新消息内容为本地文件路径
-                    message.content = str(save_path)
+                    message.content = str(actual_file_path)
                     await self._handle_message(message, download_directory)
-                    wayne_print(f"下载文件成功: {message.oss_key} -> {save_path}", 'green')
+                    wayne_print(f"下载文件成功: {message.oss_key} -> {actual_file_path}", 'green')
                 else:
                     wayne_print(f"下载文件失败: {message.oss_key}", 'red')
                     # 即使下载失败，也传递原始消息，让用户知道有文件消息
                     await self._handle_message(message, download_directory)
             
             elif message.msg_type == CommMsgType.FOLDER:
-                # 下载文件夹
-                folder_name = f"folder_{int(time.time())}"
-                save_path = download_dir / folder_name
+                # 下载文件夹 - 直接使用download_directory作为目标目录
+                # 为避免冲突，在目录名后添加时间戳
+                timestamp = int(time.time())
+                save_path = download_dir / f"folder_{timestamp}"
                 
                 if self._download_folder_from_oss(message.oss_key, str(save_path)):
                     # 更新消息内容为本地文件夹路径
@@ -955,7 +958,7 @@ if __name__ == '__main__':
             wayne_print(f"OSS Key: {message.oss_key}", 'white')
             
             # 可以选择手动下载
-            # success = client.download_file_manually(message.oss_key, "special_file.txt")
+            # success = client.download_file_manually(message.oss_key, "./manual_downloads/")
             # if success:
             #     wayne_print("文件下载成功", 'green')
         
@@ -1024,7 +1027,7 @@ if __name__ == '__main__':
             wayne_print("- 可以为不同类型的文件设置不同的下载目录", 'white')
             
             # 手动下载文件示例（适用于没有设置下载目录的处理器）
-            # success = client.download_file_manually("oss_key", "本地保存路径")
+            # success = client.download_file_manually("oss_key", "./manual_downloads/")
             # if success:
             #     wayne_print("文件下载成功", 'green')
             # else:
