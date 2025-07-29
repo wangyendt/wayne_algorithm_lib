@@ -467,9 +467,9 @@ def wayne_print(text: object, color: str = "default", bold: bool = False, verbos
         
         if verbose_level == 1:
             # Simple verbose mode: timestamp + file + line
-            filename = os.path.basename(caller_frame.filename)
+            filename = os.path.abspath(caller_frame.filename)
             line_number = caller_frame.lineno
-            print(f"\033[36m[{timestamp}] {filename}:{line_number}\033[0m")
+            print(f"\033[36m[{timestamp}] {filename}, line {line_number}\033[0m")
             
         elif verbose_level >= 2:
             # Full verbose mode: complete call stack
@@ -480,13 +480,13 @@ def wayne_print(text: object, color: str = "default", bold: bool = False, verbos
             # Print call stack (skip the first frame which is wayne_print itself)
             print(f"\033[36m[CALL STACK] 调用栈信息 (从最近到最远):\033[0m")
             for i, frame_info in enumerate(stack[1:], 1):  # Skip frame 0 (current function)
-                filename = frame_info.filename
+                filename = os.path.abspath(frame_info.filename)
                 function_name = frame_info.function
                 line_number = frame_info.lineno
                 code_context = frame_info.code_context[0].strip() if frame_info.code_context else "N/A"
                 
-                print(f"\033[36m  {i}. 文件: {filename}\033[0m")
-                print(f"\033[36m     函数: {function_name}() 第{line_number}行\033[0m")
+                print(f"\033[36m  {i}. 文件: {filename}, line {line_number}\033[0m")
+                print(f"\033[36m     函数: {function_name}\033[0m")
                 print(f"\033[36m     代码: {code_context}\033[0m")
                 print()
             
