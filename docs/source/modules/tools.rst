@@ -213,15 +213,49 @@ gettool 是一个命令行工具，用于快速获取和管理 C++ 工具库中�
       logger = wayne_logger("myLogger", "1.0.0", "./logs")
       logger.info("应用启动")
 
-2. .. py:function:: wayne_print(text: object, color: str = "default", bold: bool = False)
+2. .. py:function:: wayne_print(text: object, color: str = "default", bold: bool = False, verbose: Union[bool, int] = False)
 
-   带颜色的打印函数，用于在控制台输出醒目的信息。
+   增强的带颜色打印函数，支持多级调试模式和复杂数据结构的优化显示。
    
-   **应用场景**：在调试模式下快速确定关键输出，或在命令行工具中增强用户体验。
+   **参数说明**：
+   
+   - ``text``: 要打印的文本内容（支持任意类型，复杂类型将使用pprint格式化）
+   - ``color``: 文本颜色，支持 "default", "red", "green", "yellow", "blue", "magenta", "cyan", "white"
+   - ``bold``: 是否加粗显示
+   - ``verbose``: 调试级别
+     
+     - ``0`` 或 ``False``: 无调试信息（默认）
+     - ``1`` 或 ``True``: 简单调试模式（时间戳+文件名+行号）
+     - ``2``: 完整调试模式（详细调用栈信息）
+   
+   **新增功能**：
+   
+   - **多级调试模式**: 支持不同详细程度的调试信息
+   - **智能格式化**: 自动检测复杂数据类型（字典、列表、元组等）并使用pprint美化输出
+   - **向后兼容**: 完全兼容原有的布尔型verbose参数
+   
+   **应用场景**：在调试模式下快速确定关键输出，或在命令行工具中增强用户体验。不同级别的verbose模式适合不同的调试需求，pprint功能使复杂数据结构更易读。
    
    **示例**::
 
+      # 基本使用
       wayne_print("操作成功", color="green", bold=True)
+      
+      # 简单调试模式 - 显示时间戳和位置
+      wayne_print("调试信息", color="yellow", verbose=1)
+      # 或使用布尔值（向后兼容）
+      wayne_print("调试信息", color="yellow", verbose=True)
+      
+      # 完整调试模式 - 显示详细调用栈
+      wayne_print("详细调试", color="red", verbose=2)
+      
+      # 复杂数据结构会自动使用pprint格式化
+      data = {"name": "张三", "skills": ["Python", "Go"]}
+      wayne_print(data, color="blue", verbose=1)
+      
+      # 输出示例：
+      # 简单模式: [2024-07-29 10:21:06.487] script.py:42
+      # 复杂数据: {'name': '张三', 'skills': ['Python', 'Go']}
 
 配置文件操作
 -----------------

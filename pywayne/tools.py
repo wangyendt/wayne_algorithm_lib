@@ -429,7 +429,7 @@ def wayne_logger(logger_name: str, project_version: str, log_root: str,
     return logger
 
 
-def wayne_print(text: object, color: str = "default", bold: bool = False):
+def wayne_print(text: object, color: str = "default", bold: bool = False, verbose: Union[bool, int] = False):
     """
     Function to print text in color and/or bold.
 
@@ -437,6 +437,7 @@ def wayne_print(text: object, color: str = "default", bold: bool = False):
     - text: Text to be printed
     - color: Text color, options include "default", "red", "green", "yellow", "blue", "magenta", "cyan", "white"
     - bold: Boolean, if True, prints the text in bold
+    - verbose: Debug level, 0/False=no debug, 1/True=simple debug (timestamp+file+line), 2=full debug (call stack)
     """
     colors = {
         "default": "\033[0m",  # Default color
@@ -448,10 +449,66 @@ def wayne_print(text: object, color: str = "default", bold: bool = False):
         "cyan": "\033[36m",  # Cyan
         "white": "\033[37m"  # White
     }
+    
+    # Convert verbose to integer for consistent handling
+    if isinstance(verbose, bool):
+        verbose_level = 1 if verbose else 0
+    else:
+        verbose_level = int(verbose)
+    
+    # Print verbose information if requested
+    if verbose_level > 0:
+        # Get current timestamp with millisecond precision
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
+        # Get call stack information
+        stack = inspect.stack()
+        caller_frame = stack[1]  # Skip frame 0 (current function)
+        
+        if verbose_level == 1:
+            # Simple verbose mode: timestamp + file + line
+            filename = os.path.basename(caller_frame.filename)
+            line_number = caller_frame.lineno
+            print(f"\033[36m[{timestamp}] {filename}:{line_number}\033[0m")
+            
+        elif verbose_level >= 2:
+            # Full verbose mode: complete call stack
+            print(f"\033[36m{'='*80}\033[0m")
+            print(f"\033[36m[VERBOSE] Wayne Print Debug Information\033[0m")
+            print(f"\033[36m[TIMESTAMP] {timestamp}\033[0m")
+            
+            # Print call stack (skip the first frame which is wayne_print itself)
+            print(f"\033[36m[CALL STACK] 调用栈信息 (从最近到最远):\033[0m")
+            for i, frame_info in enumerate(stack[1:], 1):  # Skip frame 0 (current function)
+                filename = frame_info.filename
+                function_name = frame_info.function
+                line_number = frame_info.lineno
+                code_context = frame_info.code_context[0].strip() if frame_info.code_context else "N/A"
+                
+                print(f"\033[36m  {i}. 文件: {filename}\033[0m")
+                print(f"\033[36m     函数: {function_name}() 第{line_number}行\033[0m")
+                print(f"\033[36m     代码: {code_context}\033[0m")
+                print()
+            
+            print(f"\033[36m[MESSAGE] 实际输出内容:\033[0m")
+            print(f"\033[36m{'='*80}\033[0m")
+    
+    # Check if text is a complex data structure that would benefit from pprint
+    def is_complex_type(obj):
+        return isinstance(obj, (dict, list, tuple, set, frozenset)) and not isinstance(obj, str)
+    
     bold_code = "\033[1m" if bold else ""
     color_code = colors.get(color, colors["default"])
     end_code = colors["default"]  # Reset color and style to avoid affecting subsequent prints
-    print(f"{color_code}{bold_code}{text}{end_code}")
+    
+    if is_complex_type(text):
+        # Use pprint for complex data structures
+        print(f"{color_code}{bold_code}", end="")
+        pprint.pprint(text)
+        print(f"{end_code}", end="")
+    else:
+        # Regular print for simple types
+        print(f"{color_code}{bold_code}{text}{end_code}")
 
 
 def write_yaml_config(config_yaml_file: str, config: dict, update=False, use_lock: bool = False, default_flow_style=False):
