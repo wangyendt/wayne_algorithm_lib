@@ -49,7 +49,8 @@ class PangolinViewer:
         lib_path = os.path.join(os.path.dirname(__file__), 'lib')
         sys.path.append(str(lib_path))
         try:
-            from pywayne.visualization.pangolin_utils import PangolinViewer as Viewer
+            # 修复：应该导入外部的pangolin_viewer，而不是自己
+            Viewer = importlib.import_module("pangolin_viewer").PangolinViewer
         except ImportError:
             os.makedirs(lib_path, exist_ok=True)
             subprocess.run(['gettool', 'pangolin_viewer', '-b', '-t', str(lib_path)], check=True)
