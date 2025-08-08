@@ -1182,8 +1182,8 @@ class LarkBot:
 if __name__ == '__main__':
     # 创建机器人实例
     bot = LarkBot(
-        app_id="cli_a785d99779791013",
-        app_secret="bt1JJe4iOy3L7ifsSZsOddDm5xV4xjAT"
+        app_id="cli_xxx",
+        app_secret="xxxxxx"
     )
 
     try:
