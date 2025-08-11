@@ -7,7 +7,7 @@ gitstats: 统计 Git 提交时间分布
 ------------
 
 - 需要已安装 ``git``
-- Python 依赖：``pandas``、``matplotlib``（随 ``pywayne`` 一并安装）
+- Python 依赖：``pandas``、``matplotlib`` （随 ``pywayne`` 一并安装）
 
 基本用法
 --------

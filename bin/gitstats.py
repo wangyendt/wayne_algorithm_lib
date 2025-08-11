@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from pywayne.plot import parula_map
+from pywayne.tools import wayne_print
 
 
 def get_repo_name(repo: str) -> str:
@@ -144,7 +145,7 @@ def main() -> None:
         plt.show()
     else:
         fig.savefig(args.save, dpi=150)
-        print(f"Saved: {args.save}")
+        wayne_print(f"Saved: {args.save}", 'green')
 
 
 if __name__ == "__main__":
