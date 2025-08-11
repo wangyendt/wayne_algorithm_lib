@@ -69,11 +69,6 @@ def main() -> None:
     ap.add_argument("--save", default="git_time_distribution.png", help="图片输出路径")
     ap.add_argument("-p", "--show-plot", "--show_plot", action="store_true", help="弹窗展示图表（不保存文件）")
 
-    # 无参数时显示帮助并退出
-    if len(sys.argv) == 1:
-        ap.print_help()
-        return
-
     args = ap.parse_args()
 
     repo_name = get_repo_name(args.repo)
