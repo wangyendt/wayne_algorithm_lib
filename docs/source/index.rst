@@ -103,6 +103,14 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
    modules/lark_custom_bot
    modules/tts
 
+.. toctree::
+   :maxdepth: 1
+   :caption: 命令行工具:
+   :name: cli-tools
+
+   bin/gitstats
+   bin/gettool
+
 贡献指南
 ------------
 

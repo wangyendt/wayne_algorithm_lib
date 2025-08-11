@@ -82,6 +82,8 @@ setuptools.setup(
     python_requires='>=3',
     scripts=[
         'bin/gettool',  # shell script
-        'bin/gettool.py'  # python script
+        'bin/gettool.py',  # python script
+        'bin/gitstats',    # shell script
+        'bin/gitstats.py'  # python script
     ]
 )
