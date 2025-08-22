@@ -61,6 +61,7 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
    modules/helper
    modules/data_structure
    modules/maths
+   modules/crypto
 
 .. toctree::
    :maxdepth: 2
