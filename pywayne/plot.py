@@ -10,7 +10,6 @@
 # code is far away from bugs.
 """
 
-import matplotlib.docstring as docstring
 import numpy as np
 from matplotlib import _preprocess_data
 from matplotlib.axes import Axes
@@ -290,7 +289,6 @@ class SpecgramAxes(Axes):
     name = 'z_norm'
 
     @_preprocess_data(replace_names=["x"])
-    @docstring.dedent_interpd
     def specgram(self, x, NFFT=None, Fs=None, Fc=None, detrend=None,
                  window=None, noverlap=None,
                  cmap=None, xextent=None, pad_to=None, sides=None,
@@ -311,9 +309,43 @@ class SpecgramAxes(Axes):
         x : 1-D array or sequence
             Array or sequence containing the data.
 
-        %(Spectral)s
+        NFFT : int, default: 256
+            The number of data points used in each block for the FFT.
+            This must be a power of 2.
 
-        %(PSD)s
+        Fs : float, default: 2
+            The sampling frequency (samples per time unit). It is used
+            to calculate the Fourier frequencies, freqs, in cycles per
+            time unit.
+
+        detrend : {'none', 'mean', 'linear'} or callable, default: 'none'
+            The function applied to each segment before fft-ing,
+            designed to remove the mean or linear trend.
+
+        window : callable or ndarray, default: `window_hanning`
+            A function or a vector of length *NFFT*. To create window
+            vectors see `numpy.hanning`, `numpy.hamming`, `numpy.bartlett`,
+            `numpy.blackman`, `numpy.kaiser`, `scipy.signal`,
+            `scipy.signal.get_window`, etc. If a function is passed as the
+            argument, it must take a data segment as an argument and return
+            the windowed version of the segment.
+
+        pad_to : int, optional
+            The number of points to which the data segment is padded when
+            performing the FFT. This can be different from *NFFT*, which
+            specifies the number of data points from *x* that go into each
+            segment.
+
+        sides : {'default', 'onesided', 'twosided'}, optional
+            Which sides of the spectrum to return. 'default' is one-sided
+            for real data and two-sided for complex data. 'onesided' forces
+            the return of a one-sided spectrum, while 'twosided' forces
+            two-sided.
+
+        scale_by_freq : bool, default: True
+            Whether the resulting density values should be scaled by the
+            scaling frequency, which gives density in units of Hz^-1. This
+            allows for integration over the returned frequency values.
 
         mode : {'default', 'psd', 'magnitude', 'angle', 'phase'}
             What sort of spectrum to use.  Default is 'psd', which takes the
