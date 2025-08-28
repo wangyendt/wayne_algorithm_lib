@@ -85,6 +85,8 @@ setuptools.setup(
         'bin/gettool',  # shell script
         'bin/gettool.py',  # python script
         'bin/gitstats',    # shell script
-        'bin/gitstats.py'  # python script
+        'bin/gitstats.py',  # python script
+        'bin/cmdlogger',   # shell script
+        'bin/cmdlogger.py'  # python script
     ]
 )
