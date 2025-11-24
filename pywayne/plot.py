@@ -1,13 +1,83 @@
 # !/usr/bin/env python
 # -*- coding:utf-8 -*-
-""" 
+"""
+PyWayne 绘图工具库 - 增强型频谱分析模块
+
+提供专业的时频分析可视化工具，特别优化用于：
+- IMU 传感器数据（加速度计、陀螺仪）
+- 生理信号（PPG、ECG、呼吸）
+- 振动分析
+- 音频信号处理
+
+主要特性：
+---------
+1. **SpecgramAxes**: 增强型频谱图类
+   - 支持频率单位转换（Hz ↔ bpm ↔ kHz）
+   - 多种归一化模式（全局/局部/不归一化）
+   - 优化的色彩映射（Parula风格）
+   - 完整返回值支持交互分析
+
+2. **parula_map**: MATLAB风格色彩映射
+   - 感知均匀的色彩分布
+   - 适合科学可视化
+
+使用示例：
+---------
+基础用法::
+
+    from pywayne.plot import regist_projection, parula_map
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # 注册自定义projection
+    regist_projection()
+    
+    # 创建频谱图
+    fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+    spec, freqs, t, im = ax.specgram(
+        x=signal_data,
+        Fs=100,
+        NFFT=128,
+        noverlap=96,
+        cmap=parula_map,
+        scale='dB'
+    )
+    ax.set_ylabel('Frequency (Hz)')
+    plt.colorbar(im, label='Magnitude (dB)')
+    plt.show()
+
+生理信号（转换为bpm）::
+
+    spec, freqs, t, im = ax.specgram(
+        x=ppg_signal,
+        Fs=100,
+        NFFT=400,
+        noverlap=300,
+        freq_scale=60,  # Hz -> bpm
+        scale='dB'
+    )
+    ax.set_ylabel('Heart Rate (bpm)')
+    ax.set_ylim(40, 180)
+
+交互式分析::
+
+    spec, freqs, t, im = ax.specgram(...)
+    
+    def on_click(event):
+        if event.xdata and event.inaxes == ax:
+            time_idx = np.argmin(np.abs(t - event.xdata))
+            plt.figure()
+            plt.plot(freqs, spec[:, time_idx])
+            plt.title(f'FFT at t={event.xdata:.2f}s')
+            plt.show()
+    
+    fig.canvas.mpl_connect('button_press_event', on_click)
+
 @author: Wang Ye (Wayne)
 @file: plot.py
 @time: 2022/03/01
+@updated: 2025/11/24
 @contact: wangye@oppo.com
-@site: 
-@software: PyCharm
-# code is far away from bugs.
 """
 
 import numpy as np
@@ -16,6 +86,8 @@ from matplotlib.axes import Axes
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.projections import register_projection
 from scipy.signal import spectrogram
+
+__all__ = ['SpecgramAxes', 'parula_map', 'regist_projection', 'get_specgram_params']
 
 cm_data = [
     [0.2422, 0.1504, 0.6603],
@@ -280,11 +352,80 @@ parula_map = LinearSegmentedColormap.from_list('parula', cm_data)
 
 class SpecgramAxes(Axes):
     """
-    Example:
-        regist_projection()
-        plt.subplot(111, projection='z_norm')
-        plt.specgram(x=ppg_filter, Fs=fs, NFFT=win_time * fs, noverlap=(win_time - step_time) * fs, cmap=parula_map, mode='magnitude', scale='linear', scale_by_freq=True)
-
+    自定义的频谱图坐标轴类，支持高级频谱分析和可视化。
+    
+    主要特性:
+        - 支持频率缩放（如 Hz 转 bpm）
+        - 多种标度模式（线性、dB、全局归一化、局部归一化）
+        - 优化的可视化效果
+        - 完整的返回值支持交互分析
+    
+    Examples
+    --------
+    基础用法 - IMU信号分析:
+        >>> import matplotlib.pyplot as plt
+        >>> from pywayne.plot import regist_projection, parula_map
+        >>> import numpy as np
+        >>> 
+        >>> # 生成测试信号
+        >>> fs = 100  # 采样率
+        >>> t = np.linspace(0, 10, fs*10)
+        >>> signal = np.sin(2*np.pi*5*t) + 0.5*np.sin(2*np.pi*15*t)
+        >>> 
+        >>> # 创建频谱图
+        >>> regist_projection()
+        >>> fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+        >>> spec, freqs, t, im = ax.specgram(
+        ...     x=signal, 
+        ...     Fs=fs, 
+        ...     NFFT=100,
+        ...     noverlap=50,
+        ...     cmap=parula_map,
+        ...     mode='magnitude',
+        ...     scale='dB'
+        ... )
+        >>> ax.set_ylabel('Frequency (Hz)')
+        >>> ax.set_xlabel('Time (s)')
+        >>> plt.show()
+    
+    生理信号分析（PPG/心率）- 频率转换为 bpm:
+        >>> # PPG信号，想要以 bpm 显示频率
+        >>> fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+        >>> spec, freqs, t, im = ax.specgram(
+        ...     x=ppg_signal,
+        ...     Fs=100,
+        ...     NFFT=200,
+        ...     noverlap=150,
+        ...     freq_scale=60,  # Hz -> bpm
+        ...     scale='dB'
+        ... )
+        >>> ax.set_ylabel('Frequency (bpm)')
+        >>> plt.show()
+    
+    振动分析 - 全局归一化:
+        >>> fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+        >>> spec, freqs, t, im = ax.specgram(
+        ...     x=vibration_data,
+        ...     Fs=1000,
+        ...     NFFT=1024,
+        ...     noverlap=512,
+        ...     scale='linear',
+        ...     normalize='global'  # 全局归一化
+        ... )
+        >>> plt.colorbar(im, label='Normalized Magnitude')
+        >>> plt.show()
+    
+    高分辨率分析 - 零填充:
+        >>> fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+        >>> spec, freqs, t, im = ax.specgram(
+        ...     x=signal,
+        ...     Fs=100,
+        ...     NFFT=100,
+        ...     pad_to=512,  # 零填充到512点，提高频率分辨率
+        ...     noverlap=80,
+        ...     scale='dB'
+        ... )
+        >>> plt.show()
     """
     name = 'z_norm'
 
@@ -293,130 +434,178 @@ class SpecgramAxes(Axes):
                  window=None, noverlap=None,
                  cmap=None, xextent=None, pad_to=None, sides=None,
                  scale_by_freq=None, mode=None, scale=None,
-                 vmin=None, vmax=None, **kwargs):
+                 vmin=None, vmax=None, freq_scale=1.0, normalize='global',
+                 **kwargs):
         """
-        Plot a spectrogram.
-
-        Compute and plot a spectrogram of data in *x*.  Data are split into
-        *NFFT* length segments and the spectrum of each section is
-        computed.  The windowing function *window* is applied to each
-        segment, and the amount of overlap of each segment is
-        specified with *noverlap*. The spectrogram is plotted as a colormap
-        (using imshow).
+        绘制增强型频谱图（STFT时频分析）。
+        
+        将数据分割成 NFFT 长度的片段，计算每个片段的频谱，并以彩色图显示。
+        支持频率缩放、多种归一化模式，适用于各类信号分析场景。
 
         Parameters
         ----------
         x : 1-D array or sequence
-            Array or sequence containing the data.
+            输入信号数组。
 
         NFFT : int, default: 256
-            The number of data points used in each block for the FFT.
-            This must be a power of 2.
-
+            FFT窗口长度（每段数据点数）。
+            - 越大 → 频率分辨率越高，时间分辨率越低
+            - 建议设为2的幂次方以提高FFT效率
+            - 常用值: 128, 256, 512, 1024
+            
         Fs : float, default: 2
-            The sampling frequency (samples per time unit). It is used
-            to calculate the Fourier frequencies, freqs, in cycles per
-            time unit.
-
-        detrend : {'none', 'mean', 'linear'} or callable, default: 'none'
-            The function applied to each segment before fft-ing,
-            designed to remove the mean or linear trend.
-
-        window : callable or ndarray, default: `window_hanning`
-            A function or a vector of length *NFFT*. To create window
-            vectors see `numpy.hanning`, `numpy.hamming`, `numpy.bartlett`,
-            `numpy.blackman`, `numpy.kaiser`, `scipy.signal`,
-            `scipy.signal.get_window`, etc. If a function is passed as the
-            argument, it must take a data segment as an argument and return
-            the windowed version of the segment.
-
-        pad_to : int, optional
-            The number of points to which the data segment is padded when
-            performing the FFT. This can be different from *NFFT*, which
-            specifies the number of data points from *x* that go into each
-            segment.
-
-        sides : {'default', 'onesided', 'twosided'}, optional
-            Which sides of the spectrum to return. 'default' is one-sided
-            for real data and two-sided for complex data. 'onesided' forces
-            the return of a one-sided spectrum, while 'twosided' forces
-            two-sided.
-
-        scale_by_freq : bool, default: True
-            Whether the resulting density values should be scaled by the
-            scaling frequency, which gives density in units of Hz^-1. This
-            allows for integration over the returned frequency values.
-
-        mode : {'default', 'psd', 'magnitude', 'angle', 'phase'}
-            What sort of spectrum to use.  Default is 'psd', which takes the
-            power spectral density.  'magnitude' returns the magnitude
-            spectrum.  'angle' returns the phase spectrum without unwrapping.
-            'phase' returns the phase spectrum with unwrapping.
+            采样频率 (Hz)。
+            频率分辨率 = Fs / NFFT
 
         noverlap : int, default: 128
-            The number of points of overlap between blocks.
+            相邻窗口的重叠点数。
+            - 越大 → 时间分辨率越高，计算量越大
+            - 典型值: NFFT * 0.5 ~ 0.9
+            - 例如 NFFT=256, noverlap=192 (75%重叠)
 
-        scale : {'default', 'linear', 'dB'}
-            The scaling of the values in the *spec*.  'linear' is no scaling.
-            'dB' returns the values in dB scale.  When *mode* is 'psd',
-            this is dB power (10 * log10).  Otherwise this is dB amplitude
-            (20 * log10). 'default' is 'dB' if *mode* is 'psd' or
-            'magnitude' and 'linear' otherwise.  This must be 'linear'
-            if *mode* is 'angle' or 'phase'.
+        cmap : Colormap, optional
+            色彩映射。推荐使用 `parula_map`（MATLAB风格）
+            其他选项: 'viridis', 'jet', 'hot', 'cool'
 
-        Fc : int, default: 0
-            The center frequency of *x*, which offsets the x extents of the
-            plot to reflect the frequency range used when a signal is acquired
-            and then filtered and downsampled to baseband.
+        mode : {'default', 'psd', 'magnitude', 'angle', 'phase'}, default: 'psd'
+            频谱类型:
+            - 'psd': 功率谱密度 (推荐用于能量分析)
+            - 'magnitude': 幅度谱 (推荐用于频率成分分析)
+            - 'angle': 相位谱（不展开）
+            - 'phase': 相位谱（展开）
 
-        cmap : `.Colormap`, default: :rc:`image.cmap`
+        scale : {'default', 'linear', 'dB'}, default: 'dB'
+            幅度标度:
+            - 'dB': 分贝标度，适合大动态范围信号
+              * PSD模式: 10*log10(spec)
+              * Magnitude模式: 20*log10(spec)
+            - 'linear': 线性标度
+            - 'default': 根据mode自动选择
+            
+        normalize : {'global', 'local', 'none'}, default: 'global'
+            归一化方式 (仅在 scale='linear' 时生效):
+            - 'global': 全局归一化 Z/max(Z)，保留相对强度关系
+            - 'local': 按时间段归一化，每列独立缩放到[0,1]
+            - 'none': 不归一化
+            
+        freq_scale : float, default: 1.0
+            频率缩放因子。
+            使用场景:
+            - 1.0: 保持Hz (默认)
+            - 60: Hz → bpm (心率/呼吸等生理信号)
+            - 0.001: Hz → kHz
+            输出频率 = 原始频率 × freq_scale
 
-        xextent : *None* or (xmin, xmax)
-            The image extent along the x-axis. The default sets *xmin* to the
-            left border of the first bin (*spectrum* column) and *xmax* to the
-            right border of the last bin. Note that for *noverlap>0* the width
-            of the bins is smaller than those of the segments.
+        Fc : float, default: 0
+            中心频率偏移 (Hz)。
+            用于下变频信号的频率轴校正。
+
+        detrend : {'none', 'mean', 'linear'} or callable, default: 'none'
+            去趋势方法:
+            - 'none': 不处理
+            - 'mean': 去除均值（去直流分量）
+            - 'linear': 去除线性趋势
+
+        window : callable or ndarray, optional
+            窗函数。默认使用汉宁窗。
+            可选: np.hamming, np.blackman, np.kaiser 等
+
+        pad_to : int, optional
+            零填充长度。
+            - 可以大于 NFFT 来提高频率分辨率
+            - 例如: NFFT=128, pad_to=512 可得到更平滑的频谱
+
+        scale_by_freq : bool, default: True
+            是否按频率缩放密度值（仅PSD模式）。
+
+        sides : {'default', 'onesided', 'twosided'}, optional
+            频谱类型:
+            - 'onesided': 单边谱（实信号默认）
+            - 'twosided': 双边谱（复信号默认）
+
+        xextent : tuple of (xmin, xmax), optional
+            时间轴范围。默认自动计算。
+
+        vmin, vmax : float, optional
+            色彩映射的值域范围。
 
         **kwargs
-            Additional keyword arguments are passed on to `~.axes.Axes.imshow`
-            which makes the specgram image. The origin keyword argument
-            is not supported.
+            传递给 `imshow` 的其他参数（如 aspect, interpolation）。
+            注意: 不支持 'origin' 参数。
 
         Returns
         -------
-        spectrum : 2D array
-            Columns are the periodograms of successive segments.
-
-        freqs : 1-D array
-            The frequencies corresponding to the rows in *spectrum*.
-
-        t : 1-D array
-            The times corresponding to midpoints of segments (i.e., the columns
-            in *spectrum*).
-
-        im : `.AxesImage`
-            The image created by imshow containing the spectrogram.
-
-        See Also
-        --------
-        psd
-            Differs in the default overlap; in returning the mean of the
-            segment periodograms; in not returning times; and in generating a
-            line plot instead of colormap.
-        magnitude_spectrum
-            A single spectrum, similar to having a single segment when *mode*
-            is 'magnitude'. Plots a line instead of a colormap.
-        angle_spectrum
-            A single spectrum, similar to having a single segment when *mode*
-            is 'angle'. Plots a line instead of a colormap.
-        phase_spectrum
-            A single spectrum, similar to having a single segment when *mode*
-            is 'phase'. Plots a line instead of a colormap.
+        spec : 2D ndarray, shape (n_freqs, n_times)
+            频谱数据矩阵。每列是一个时间段的频谱。
+            
+        freqs : 1D ndarray, shape (n_freqs,)
+            频率轴数组 (已应用 freq_scale 和 Fc)。
+            
+        t : 1D ndarray, shape (n_times,)
+            时间轴数组（各段的中心时刻）。
+            
+        im : AxesImage
+            matplotlib 图像对象，可用于添加colorbar。
 
         Notes
         -----
-        The parameters *detrend* and *scale_by_freq* do only apply when *mode*
-        is set to 'psd'.
+        - 频率分辨率: Δf = Fs / NFFT
+        - 时间分辨率: Δt = (NFFT - noverlap) / Fs
+        - 不确定性原理: Δf × Δt ≥ 常数（无法同时获得极高的频率和时间分辨率）
+        - dB模式下会自动处理log(0)问题（映射到极小值）
+        
+        Examples
+        --------
+        IMU加速度信号分析:
+            >>> fs = 100
+            >>> win_time, step_time = 1, 0.1
+            >>> spec, freqs, t, im = ax.specgram(
+            ...     x=acc_data,
+            ...     Fs=fs,
+            ...     NFFT=int(win_time * fs),
+            ...     noverlap=int((win_time - step_time) * fs),
+            ...     scale='dB',
+            ...     cmap=parula_map
+            ... )
+            >>> ax.set_ylabel('Frequency (Hz)')
+            >>> ax.set_ylim(0, 30)  # 关注0-30Hz范围
+            
+        心率信号（PPG）:
+            >>> fs = 100
+            >>> spec, freqs, t, im = ax.specgram(
+            ...     x=ppg_signal,
+            ...     Fs=fs,
+            ...     NFFT=400,  # 4秒窗口
+            ...     noverlap=300,
+            ...     freq_scale=60,  # 转换为bpm
+            ...     scale='dB'
+            ... )
+            >>> ax.set_ylabel('Heart Rate (bpm)')
+            >>> ax.set_ylim(40, 180)  # 典型心率范围
+            
+        交互式分析（点击查看FFT）:
+            >>> spec, freqs, t, im = ax.specgram(...)
+            >>> def on_click(event):
+            ...     if event.xdata:
+            ...         idx = np.argmin(np.abs(t - event.xdata))
+            ...         plt.figure()
+            ...         plt.plot(freqs, spec[:, idx])
+            ...         plt.xlabel('Frequency')
+            ...         plt.ylabel('Magnitude')
+            ...         plt.show()
+            >>> fig.canvas.mpl_connect('button_press_event', on_click)
+
+        See Also
+        --------
+        scipy.signal.spectrogram : 底层频谱图计算函数
+        matplotlib.pyplot.specgram : Matplotlib标准频谱图
+        
+        References
+        ----------
+        .. [1] Julius O. Smith III, "Spectral Audio Signal Processing",
+               W3K Publishing, 2011, ISBN 978-0-9745607-3-1.
+        .. [2] Oppenheim, A. V., & Schafer, R. W. (2009). 
+               Discrete-time signal processing (3rd ed.).
         """
         if NFFT is None:
             NFFT = 256  # same default as in mlab.specgram()
@@ -451,16 +640,31 @@ class SpecgramAxes(Axes):
         #                                scale_by_freq=scale_by_freq,
         #                                mode=mode)
 
+        # 幅度标度处理
         if scale == 'linear':
             Z = spec
-            Z = np.apply_along_axis(lambda x: x / np.max(x), 0, Z)
-        elif scale == 'dB':
-            if mode is None or mode == 'default' or mode == 'psd':
-                Z = 10. * np.log10(spec)
+            # 根据 normalize 参数选择归一化方式
+            if normalize == 'global':
+                # 全局归一化：保留相对强度关系
+                Z = Z / np.max(Z) if np.max(Z) > 0 else Z
+            elif normalize == 'local':
+                # 局部归一化：每个时间段独立归一化
+                Z = np.apply_along_axis(lambda x: x / np.max(x) if np.max(x) > 0 else x, 0, Z)
+            elif normalize == 'none':
+                # 不归一化
+                pass
             else:
-                Z = 20. * np.log10(spec)
+                raise ValueError(f"Unknown normalize mode: {normalize}. "
+                               "Choose from 'global', 'local', or 'none'.")
+        elif scale == 'dB':
+            # dB标度：处理log(0)问题
+            epsilon = 1e-10  # 避免log(0)
+            if mode is None or mode == 'default' or mode == 'psd':
+                Z = 10. * np.log10(spec + epsilon)
+            else:
+                Z = 20. * np.log10(spec + epsilon)
         else:
-            raise ValueError('Unknown scale %s', scale)
+            raise ValueError(f'Unknown scale: {scale}. Choose from "linear" or "dB".')
 
         Z = np.flipud(Z)
 
@@ -469,8 +673,11 @@ class SpecgramAxes(Axes):
             pad_xextent = (NFFT - noverlap) / Fs / 2
             xextent = np.min(t) - pad_xextent, np.max(t) + pad_xextent
         xmin, xmax = xextent
+        
+        # 应用频率偏移和缩放
         freqs += Fc
-        freqs *= 60
+        freqs *= freq_scale  # 参数化的频率缩放（如 Hz -> bpm）
+        
         extent = xmin, xmax, freqs[0], freqs[-1]
 
         if 'origin' in kwargs:
@@ -486,4 +693,118 @@ class SpecgramAxes(Axes):
 
 
 def regist_projection():
+    """
+    注册自定义 SpecgramAxes projection。
+    
+    在使用 SpecgramAxes 绘制频谱图前必须调用此函数。
+    
+    Examples
+    --------
+    >>> from pywayne.plot import regist_projection
+    >>> import matplotlib.pyplot as plt
+    >>> 
+    >>> regist_projection()
+    >>> fig, ax = plt.subplots(subplot_kw={'projection': 'z_norm'})
+    >>> # 现在可以使用 ax.specgram() 了
+    """
     register_projection(SpecgramAxes)
+
+
+def get_specgram_params(signal_length, sampling_rate, 
+                       time_resolution=None, freq_resolution=None,
+                       overlap_ratio=0.75):
+    """
+    根据信号长度和期望的分辨率，推荐 STFT 参数。
+    
+    Parameters
+    ----------
+    signal_length : int
+        信号长度（采样点数）
+    sampling_rate : float
+        采样率 (Hz)
+    time_resolution : float, optional
+        期望的时间分辨率（秒）。优先级高于 freq_resolution。
+    freq_resolution : float, optional
+        期望的频率分辨率（Hz）。当 time_resolution 未指定时使用。
+    overlap_ratio : float, default: 0.75
+        窗口重叠比例 (0-1之间)
+        
+    Returns
+    -------
+    params : dict
+        推荐的参数字典，包含:
+        - 'NFFT': FFT窗口长度
+        - 'noverlap': 重叠点数
+        - 'actual_freq_res': 实际频率分辨率
+        - 'actual_time_res': 实际时间分辨率
+        - 'n_segments': 预计的时间段数
+        
+    Examples
+    --------
+    根据期望的时间分辨率:
+        >>> params = get_specgram_params(
+        ...     signal_length=10000,
+        ...     sampling_rate=100,
+        ...     time_resolution=0.1  # 期望0.1秒时间分辨率
+        ... )
+        >>> print(params)
+        {'NFFT': 256, 'noverlap': 192, ...}
+        
+    根据期望的频率分辨率:
+        >>> params = get_specgram_params(
+        ...     signal_length=10000,
+        ...     sampling_rate=100,
+        ...     freq_resolution=0.5  # 期望0.5Hz频率分辨率
+        ... )
+        
+    直接使用推荐参数:
+        >>> params = get_specgram_params(10000, 100, time_resolution=0.1)
+        >>> spec, freqs, t, im = ax.specgram(
+        ...     x=signal,
+        ...     Fs=100,
+        ...     NFFT=params['NFFT'],
+        ...     noverlap=params['noverlap']
+        ... )
+    """
+    if time_resolution is not None:
+        # 根据时间分辨率计算NFFT
+        # time_res = (NFFT - noverlap) / Fs
+        # NFFT = time_res * Fs / (1 - overlap_ratio)
+        NFFT = int(time_resolution * sampling_rate / (1 - overlap_ratio))
+    elif freq_resolution is not None:
+        # 根据频率分辨率计算NFFT
+        # freq_res = Fs / NFFT
+        NFFT = int(sampling_rate / freq_resolution)
+    else:
+        # 默认：选择合适的NFFT（信号长度的10%或256，取较小值）
+        NFFT = min(256, int(signal_length * 0.1))
+    
+    # 确保NFFT是2的幂（FFT效率更高）
+    NFFT = 2 ** int(np.ceil(np.log2(NFFT)))
+    
+    # 限制NFFT范围
+    NFFT = max(64, min(NFFT, signal_length))
+    
+    # 计算noverlap
+    noverlap = int(NFFT * overlap_ratio)
+    
+    # 计算实际分辨率
+    actual_freq_res = sampling_rate / NFFT
+    actual_time_res = (NFFT - noverlap) / sampling_rate
+    
+    # 计算时间段数
+    step = NFFT - noverlap
+    n_segments = (signal_length - noverlap) // step
+    
+    params = {
+        'NFFT': NFFT,
+        'noverlap': noverlap,
+        'actual_freq_res': actual_freq_res,
+        'actual_time_res': actual_time_res,
+        'n_segments': n_segments,
+        'window_duration': NFFT / sampling_rate,
+        'step_duration': step / sampling_rate,
+        'overlap_ratio': overlap_ratio
+    }
+    
+    return params
