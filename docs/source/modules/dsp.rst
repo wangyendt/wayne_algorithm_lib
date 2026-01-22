@@ -35,42 +35,125 @@
 
 2. .. py:class:: ButterworthFilter
 
-   巴特沃斯滤波器类，封装了巴特沃斯滤波的初始化和调用过程。
+   纯 numpy 实现的巴特沃斯滤波器类，提供完整的 1D IIR 滤波功能。
 
-   **方法**:
+   **构造方法**:
 
-   - **__init__(self, order=2, lo=0.1, hi=10.0, fs=100.0, btype='lowpass')**
+   - **__init__(self, b: np.ndarray, a: np.ndarray, cache_zi: bool = True)**
 
-     初始化滤波器参数。
+     通过滤波器系数构造实例。
+
+     **参数**:
+
+     - **b**: 分子系数（numerator coefficients）。
+     - **a**: 分母系数（denominator coefficients）。
+     - **cache_zi**: 是否预计算稳态初始条件，默认为 True。
+
+   - **from_ba(cls, b, a, cache_zi=True)** (类方法)
+
+     通过 b、a 系数创建滤波器实例。
+
+     **参数**:
+
+     - **b**: 分子系数。
+     - **a**: 分母系数。
+     - **cache_zi**: 是否预计算初始条件。
+
+     **返回**:
+
+     - ButterworthFilter 实例。
+
+   - **from_params(cls, order, fs, btype, cutoff, cache_zi=True)** (类方法)
+
+     通过滤波器参数设计并创建实例。
 
      **参数**:
 
      - **order**: 滤波器阶数。
-     - **lo**: 低频截止频率。
-     - **hi**: 高频截止频率。
-     - **fs**: 采样频率。
-     - **btype**: 滤波器类型。
-
-   - **__call__(self, x)**
-
-     应用滤波器处理输入信号。
-
-     **参数**:
-
-     - **x**: 输入信号
+     - **fs**: 采样频率（Hz）。
+     - **btype**: 滤波器类型，可选 'lowpass', 'highpass', 'bandpass', 'bandstop'。
+     - **cutoff**: 截止频率（Hz），低通/高通为单个浮点数，带通/带阻为 (low, high) 元组。
+     - **cache_zi**: 是否预计算初始条件。
 
      **返回**:
 
-     - 滤波后的信号。
+     - ButterworthFilter 实例。
+
+   **属性**:
+
+   - **ba**: 返回 (b, a) 系数元组。
+   - **ntaps**: 滤波器抽头数（taps）。
+   - **nstate**: 滤波器状态数。
+
+   **方法**:
+
+   - **zi(self) -> np.ndarray**
+
+     返回稳态初始条件（若未缓存则懒加载计算）。
+
+     **返回**:
+
+     - 初始状态数组。
+
+   - **lfilter(self, x, zi=None) -> Tuple[np.ndarray, np.ndarray]**
+
+     Direct Form II Transposed 滤波（单向）。
+
+     **参数**:
+
+     - **x**: 输入信号。
+     - **zi**: 初始状态，可选。
+
+     **返回**:
+
+     - (y, zf)：滤波后的信号和最终状态。
+
+   - **filtfilt(self, x, padtype='odd', padlen=None) -> np.ndarray**
+
+     零相位滤波（前向-后向滤波）。
+
+     **参数**:
+
+     - **x**: 输入信号。
+     - **padtype**: 填充方式，可选 'odd', 'even', 'constant', None，默认 'odd'。
+     - **padlen**: 填充长度，默认为 3*ntaps。
+
+     **返回**:
+
+     - 零相位滤波后的信号。
+
+   **静态方法**:
+
+   - **detrend(x, method='linear', poly_order=2)** (静态方法)
+
+     信号去趋势处理。
+
+     **参数**:
+
+     - **x**: 输入信号。
+     - **method**: 去趋势方法，可选 'none', 'mean', 'linear', 'poly'。
+     - **poly_order**: 多项式阶数（仅当 method='poly' 时有效）。
+
+     **返回**:
+
+     - 去趋势后的信号。
 
    **应用场景**:
 
-   封装滤波算法，方便在应用中复用。例如，可用于在线滤波器的设计，使得在实时数据流中直接调用对象实例。
+   纯 numpy 实现的滤波器，无需依赖 SciPy，适合需要移植或自定义的场景。支持多种构造方式和滤波模式，可用于实时滤波、离线数据处理、信号预处理等。
 
    **示例**::
 
-      bf = ButterworthFilter(order=4, lo=1, hi=50, fs=200, btype='bandpass')
-      filtered = bf(signal)
+      # 方式1: 通过参数设计
+      bf = ButterworthFilter.from_params(order=4, fs=200, btype='bandpass', cutoff=(1, 50))
+      filtered = bf.filtfilt(signal)
+      
+      # 方式2: 通过系数构造
+      bf2 = ButterworthFilter.from_ba(b, a)
+      y, zf = bf2.lfilter(signal)
+      
+      # 去趋势
+      detrended = ButterworthFilter.detrend(signal, method='linear')
 
 峰值检测
 -----------

@@ -19,6 +19,8 @@ from sortedcontainers import SortedList
 from scipy.signal import butter, lfilter, filtfilt, detrend, medfilt
 from scipy.interpolate import interp1d
 
+from typing import Union, Iterable, Tuple, Optional
+
 
 def peak_det(v, delta, x=None):
     """
@@ -685,108 +687,431 @@ class SignalDetrend:
 
 
 class ButterworthFilter:
-    """Butterworth滤波器实现"""
+    """
+    纯 numpy 的 1D IIR 滤波器：
+      - lfilter: Direct Form II Transposed（对齐 SciPy 的实现形态）
+      - lfilter_zi: 解线性方程得到稳态初始条件
+      - filtfilt: pad 方法（odd/even/constant/None），默认 padlen=3*ntaps
 
-    def __init__(self, order=2, lo=0.1, hi=10.0, fs=100.0, btype='lowpass'):
+    支持两种构造：
+      - from_ba(b,a)
+      - from_params(order, fs, btype, cutoff)
+
+    cache_zi：
+      - True: 构造时预计算 zi
+      - False: 不预计算；第一次 filtfilt()/zi() 时再算（lazy）
+    """
+
+    def __init__(self, b: np.ndarray, a: np.ndarray, cache_zi: bool = True):
+        b = np.asarray(b, dtype=np.float64).ravel()
+        a = np.asarray(a, dtype=np.float64).ravel()
+        if a.size == 0:
+            raise ValueError("a must not be empty")
+        if a[0] == 0.0:
+            raise ValueError("a[0] must be nonzero")
+
+        # normalize so that a[0] == 1
+        if a[0] != 1.0:
+            b = b / a[0]
+            a = a / a[0]
+
+        self._ntaps = int(max(a.size, b.size))
+        self._nstate = self._ntaps - 1
+        self._a = self._pad_to_len(a, self._ntaps)
+        self._b = self._pad_to_len(b, self._ntaps)
+
+        self._zi = None
+        if cache_zi and self._nstate > 0:
+            self._zi = self._lfilter_zi_impl(self._b, self._a)
+
+    # ---------- constructors ----------
+
+    @classmethod
+    def from_ba(cls, b: Union[np.ndarray, Iterable[float]], a: Union[np.ndarray, Iterable[float]], cache_zi: bool = True) -> "ButterworthFilter":
+        return cls(np.asarray(b, dtype=np.float64), np.asarray(a, dtype=np.float64), cache_zi=cache_zi)
+
+    @classmethod
+    def from_params(
+        cls,
+        order: int,
+        fs: float,
+        btype: str,
+        cutoff: Union[float, Tuple[float, float]],
+        cache_zi: bool = True,
+    ) -> "ButterworthFilter":
         """
-        初始化Butterworth滤波器
-
-        Parameters:
-            order: int, 滤波器阶数，默认为2
-            lo: float, 下限频率
-            hi: float, 上限频率
-            fs: float, 采样频率
-            btype: str, 滤波器类型 ('lowpass', 'highpass', 'bandpass', 'bandstop')
+        纯 numpy Butterworth 设计（数字域），cutoff 单位 Hz：
+          - btype: 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
+          - cutoff:
+              low/high: float
+              band*: (low, high)
         """
-        if not isinstance(order, int) or order <= 0:
-            raise ValueError(f'阶数必须是正整数，当前值：{order}')
-        if order > 8:
-            wayne_print(f'高阶滤波器(order={order})可能导致数值不稳定，推荐使用2-8阶', 'yellow')
+        b, a = cls._butter_ba(order=order, fs=fs, btype=btype, cutoff=cutoff)
+        return cls(b, a, cache_zi=cache_zi)
 
-        # 计算滤波器系数
-        nyq = fs / 2
-        if btype == 'lowpass':
-            wn = hi / nyq
-        elif btype == 'highpass':
-            wn = lo / nyq
-        elif btype in ['bandpass', 'bandstop']:
-            wn = [lo / nyq, hi / nyq]
-        else:
-            raise ValueError(f'不支持的滤波器类型: {btype}')
+    # ---------- properties ----------
 
-        self.b, self.a = butter(N=order, Wn=wn, btype=btype)
+    @property
+    def ba(self) -> Tuple[np.ndarray, np.ndarray]:
+        return self._b.copy(), self._a.copy()
 
-        # 验证滤波器稳定性
-        if not np.all(np.abs(np.roots(self.a)) < 1):
-            wayne_print("滤波器可能不稳定", 'yellow')
+    @property
+    def ntaps(self) -> int:
+        return self._ntaps
 
-    def __call__(self, x):
+    @property
+    def nstate(self) -> int:
+        return self._nstate
+
+    def zi(self) -> np.ndarray:
+        """返回稳态 zi（若未缓存则 lazy 计算）。"""
+        if self._nstate <= 0:
+            return np.zeros(0, dtype=np.float64)
+        if self._zi is None:
+            self._zi = self._lfilter_zi_impl(self._b, self._a)
+        return self._zi.copy()
+
+    # ---------- public filtering APIs ----------
+
+    def lfilter(
+        self,
+        x: Union[np.ndarray, Iterable[float]],
+        zi: Optional[Union[np.ndarray, Iterable[float]]] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        对输入信号进行滤波
-
-        Parameters:
-            x: np.ndarray, 输入信号
-
-        Returns:
-            np.ndarray, 滤波后的信号
+        Direct Form II Transposed（对齐 SciPy 计算顺序）
+        返回 (y, zf)
         """
-        # 计算边界扩展
-        edge, ext = self._validate_pad(x)
+        x = self._as_f64_1d(x)
+        n = self._nstate
+        if n <= 0:
+            y = (self._b[0] * x).astype(np.float64, copy=False)
+            return y, np.zeros(0, dtype=np.float64)
 
-        # 计算初始状态
-        zi = self._lfilter_zi()
+        z = np.zeros(n, dtype=np.float64) if zi is None else self._as_f64_1d(zi).copy()
+        if z.size != n:
+            raise ValueError(f"zi must have length {n}")
 
-        # 正向滤波
-        x0 = ext[0]
-        y, _ = self._lfilter(ext, zi * x0)
+        b = self._b
+        a = self._a
+        b0 = b[0]
+        b1 = b[1:n + 1]
+        a1 = a[1:n + 1]
 
-        # 反向滤波
-        y0 = y[-1]
-        y = y[::-1]
-        y, _ = self._lfilter(y, zi * y0)
-        y = y[::-1]
+        y = np.empty_like(x, dtype=np.float64)
 
-        # 提取有效部分
-        return y[edge:len(y) - edge]
+        if n == 1:
+            for k in range(x.size):
+                xi = x[k]
+                yi = b0 * xi + z[0]
+                y[k] = yi
+                z[0] = b1[0] * xi - a1[0] * yi
+            return y, z
 
-    def _validate_pad(self, x):
-        """使用奇对称扩展处理信号边界"""
-        ntaps = max(len(self.a), len(self.b))
-        edge = ntaps * 3
-
-        ext = np.zeros(len(x) + 2 * edge)
-        ext[edge:edge + len(x)] = x
-
-        for i in range(edge):
-            ext[i] = 2 * x[0] - x[edge - i - 1]
-            ext[-(i + 1)] = 2 * x[-1] - x[-(edge - i)]
-
-        return edge, ext
-
-    def _lfilter_zi(self):
-        """计算滤波器初始状态"""
-        n = max(len(self.a), len(self.b)) - 1
-        zi = np.zeros(n)
-
-        sum_b = np.sum(self.b)
-        sum_a = np.sum(self.a)
-
-        if abs(sum_a) > 1e-6:
-            gain = sum_b / sum_a
-            zi.fill(gain)
-
-        return zi
-
-    def _lfilter(self, x, zi):
-        """实现Direct Form II型滤波器结构"""
-        n = len(x)
-        y = np.zeros(n)
-        z = zi.copy()
-
-        for i in range(n):
-            y[i] = self.b[0] * x[i] + z[0]
-            for j in range(1, len(self.a)):
-                z[j - 1] = (self.b[j] * x[i] - self.a[j] * y[i] +
-                            (z[j] if j < len(z) else 0.0))
+        for k in range(x.size):
+            xi = x[k]
+            yi = b0 * xi + z[0]
+            y[k] = yi
+            z[:-1] = z[1:] + b1[:-1] * xi - a1[:-1] * yi
+            z[-1] = b1[-1] * xi - a1[-1] * yi
 
         return y, z
+
+
+    def filtfilt(
+        self,
+        x: Union[np.ndarray, Iterable[float]],
+        padtype: Optional[str] = "odd",
+        padlen: Optional[int] = None,
+    ) -> np.ndarray:
+        """
+        padtype: 'odd' | 'even' | 'constant' | None
+        padlen: None => 3*ntaps
+        """
+        x = self._as_f64_1d(x)
+
+        if padtype is None or padlen == 0:
+            edge = 0
+        else:
+            edge = (3 * self._ntaps) if padlen is None else int(padlen)
+            if edge < 0:
+                raise ValueError("padlen must be >= 0")
+            if edge >= x.size:
+                raise ValueError(f"Input length must be > padlen (len(x)={x.size}, padlen={edge})")
+
+        ext = x if edge == 0 else self._pad(x, edge, padtype)
+
+        zi = self.zi()
+        y, _ = self.lfilter(ext, zi * ext[0] if zi.size else None)
+
+        y0 = y[-1]
+        yrev = y[::-1].copy()
+        y2, _ = self.lfilter(yrev, zi * y0 if zi.size else None)
+        y2 = y2[::-1]
+
+        return y2[edge:-edge] if edge > 0 else y2
+
+    # ---------- detrend ----------
+
+    @staticmethod
+    def detrend(x: Union[np.ndarray, Iterable[float]], method: str = "linear", poly_order: int = 2) -> np.ndarray:
+        x = ButterworthFilter._as_f64_1d(x)
+        if method == "none":
+            return x
+        if method == "mean":
+            return x - x.mean()
+        if method == "linear":
+            return ButterworthFilter._detrend_linear(x)
+        if method == "poly":
+            return ButterworthFilter._detrend_poly(x, poly_order)
+        raise ValueError(f"unsupported detrend method: {method}")
+
+    # ============================================================
+    #                      internals
+    # ============================================================
+
+    @staticmethod
+    def _as_f64_1d(x: Union[np.ndarray, Iterable[float]]) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+        if x.ndim != 1:
+            raise ValueError("x must be 1D")
+        return x
+
+    @staticmethod
+    def _pad_to_len(v: np.ndarray, n: int) -> np.ndarray:
+        if v.size >= n:
+            return v[:n].copy()
+        out = np.zeros(n, dtype=np.float64)
+        out[:v.size] = v
+        return out
+
+    @staticmethod
+    def _pad(x: np.ndarray, edge: int, padtype: str) -> np.ndarray:
+        if padtype == "odd":
+            x0, xN = x[0], x[-1]
+            left = 2.0 * x0 - x[1:edge + 1][::-1]
+            right = 2.0 * xN - x[-edge - 1:-1][::-1]
+            return np.concatenate([left, x, right])
+        if padtype == "even":
+            left = x[1:edge + 1][::-1]
+            right = x[-edge - 1:-1][::-1]
+            return np.concatenate([left, x, right])
+        if padtype == "constant":
+            return np.concatenate([np.full(edge, x[0]), x, np.full(edge, x[-1])]).astype(np.float64)
+        raise ValueError("padtype must be 'odd','even','constant', or None")
+
+    @staticmethod
+    def _solve_linear(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+        # 小维度线性方程：直接用 numpy.linalg.solve（纯 numpy，易移植时也能换成你自己的 Gauss）
+        return np.linalg.solve(A, b)
+
+    @staticmethod
+    def _lfilter_zi_impl(b: np.ndarray, a: np.ndarray) -> np.ndarray:
+        ntaps = int(max(a.size, b.size))
+        n = ntaps - 1
+        if n <= 0:
+            return np.zeros(0, dtype=np.float64)
+
+        a = a[:ntaps]
+        b = b[:ntaps]
+
+        # (I - A), A = companion(a).T
+        IA = np.zeros((n, n), dtype=np.float64)
+        for i in range(n):
+            IA[i, i] = 1.0
+            IA[i, 0] += a[i + 1]
+            if i < n - 1:
+                IA[i, i + 1] -= 1.0
+
+        b0 = b[0]
+        B = np.array([b[i + 1] - a[i + 1] * b0 for i in range(n)], dtype=np.float64)
+        zi = ButterworthFilter._solve_linear(IA, B)
+        return zi
+
+    # ---------- detrend helpers ----------
+
+    @staticmethod
+    def _detrend_linear(x: np.ndarray) -> np.ndarray:
+        n = x.size
+        if n <= 1:
+            return x - x
+        i = np.arange(n, dtype=np.float64)
+        mi = i.mean()
+        mx = x.mean()
+        di = i - mi
+        dx = x - mx
+        den = float(np.dot(di, di))
+        slope = float(np.dot(di, dx)) / den if den != 0.0 else 0.0
+        intercept = mx - slope * mi
+        return x - (slope * i + intercept)
+
+    @staticmethod
+    def _detrend_poly(x: np.ndarray, order: int) -> np.ndarray:
+        n = x.size
+        if n <= 1:
+            return x - x
+        if order < 0:
+            raise ValueError("poly_order must be >= 0")
+        idx = np.linspace(0.0, 1.0, n, dtype=np.float64)
+        c = np.polyfit(idx, x, order)
+        trend = np.polyval(c, idx)
+        return x - trend
+
+    # ============================================================
+    #                 Butterworth design (pure numpy)
+    # ============================================================
+
+    @staticmethod
+    def _butter_ba(order: int, fs: float, btype: str, cutoff: Union[float, Tuple[float, float]]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        纯 numpy 设计：目标是让 from_params 的 b/a 与 SciPy butter 尽可能一致
+        核心：z/p 变换 + bilinear 后，强制做通带单位增益归一化（解决你现在 b 巨大偏差的问题）
+        """
+        if order <= 0:
+            raise ValueError("order must be positive")
+        fs = float(fs)
+        if fs <= 0:
+            raise ValueError("fs must be > 0")
+
+        btype = btype.lower()
+        if btype not in ("lowpass", "highpass", "bandpass", "bandstop"):
+            raise ValueError("btype must be one of: lowpass/highpass/bandpass/bandstop")
+
+        fs2 = 2.0 * fs
+
+        def prewarp(f_hz: float) -> float:
+            f_hz = float(f_hz)
+            if not (0.0 < f_hz < 0.5 * fs):
+                raise ValueError("cutoff must satisfy 0 < f < fs/2")
+            return fs2 * np.tan(np.pi * f_hz / fs)
+
+        # 1) analog prototype (wc=1 rad/s)
+        z, p = ButterworthFilter._buttap_zp(order)
+
+        # 2) analog frequency transform
+        if btype in ("lowpass", "highpass"):
+            wc = prewarp(float(cutoff))
+            if btype == "lowpass":
+                z, p = ButterworthFilter._lp2lp_zp(z, p, wc)
+                w_norm = 0.0
+            else:
+                z, p = ButterworthFilter._lp2hp_zp(z, p, wc)
+                w_norm = np.pi
+        else:
+            lo, hi = cutoff  # type: ignore
+            w1 = prewarp(float(lo))
+            w2 = prewarp(float(hi))
+            if w2 <= w1:
+                raise ValueError("band cutoff must satisfy low < high")
+
+            w0 = np.sqrt(w1 * w2)
+            bw = w2 - w1
+
+            if btype == "bandpass":
+                z, p = ButterworthFilter._lp2bp_zp(z, p, w0, bw)
+                # analog w0 -> digital center via bilinear: w_d = 2*atan(w0/(2fs))
+                w_norm = 2.0 * np.arctan(w0 / fs2)
+            else:
+                z, p = ButterworthFilter._lp2bs_zp(z, p, w0, bw)
+                w_norm = 0.0  # bandstop 通常在 DC 处归一化
+
+        # 3) bilinear transform (analog -> digital)
+        z_d, p_d = ButterworthFilter._bilinear_zp(z, p, fs)
+
+        # 4) zpk -> ba（先不算 k，最后统一做增益归一化）
+        b = np.poly(z_d)
+        a = np.poly(p_d)
+
+        b = np.real_if_close(b, tol=1000).astype(np.float64)
+        a = np.real_if_close(a, tol=1000).astype(np.float64)
+
+        # normalize a[0]=1
+        b = b / a[0]
+        a = a / a[0]
+
+        # 5) 强制通带单位增益归一化（关键修复点）
+        b = ButterworthFilter._normalize_passband_gain(b, a, w_norm)
+
+        return b, a
+
+    @staticmethod
+    def _normalize_passband_gain(b: np.ndarray, a: np.ndarray, w: float) -> np.ndarray:
+        """
+        让 |H(e^{jw})| = 1
+        H = sum_k b[k] e^{-jwk} / sum_k a[k] e^{-jwk}
+        """
+        k = np.arange(b.size, dtype=np.float64)
+        ej = np.exp(-1j * w * k)
+        num = np.dot(b, ej)
+        den = np.dot(a, ej)
+        H = num / den
+        g = 1.0 / (np.abs(H) + 1e-30)
+        return (b * g).astype(np.float64)
+
+    @staticmethod
+    def _buttap_zp(n: int) -> Tuple[np.ndarray, np.ndarray]:
+        # Butterworth analog lowpass prototype: no finite zeros
+        z = np.array([], dtype=np.complex128)
+        p = np.array([np.exp(1j * np.pi * (2*k + n + 1) / (2*n)) for k in range(n)], dtype=np.complex128)
+        return z, p
+
+    @staticmethod
+    def _lp2lp_zp(z: np.ndarray, p: np.ndarray, wo: float) -> Tuple[np.ndarray, np.ndarray]:
+        return z * wo, p * wo
+
+    @staticmethod
+    def _lp2hp_zp(z: np.ndarray, p: np.ndarray, wo: float) -> Tuple[np.ndarray, np.ndarray]:
+        degree = p.size - z.size
+        z2 = (wo / z) if z.size else np.array([], dtype=np.complex128)
+        p2 = wo / p
+        if degree > 0:
+            z2 = np.concatenate([z2, np.zeros(degree, dtype=np.complex128)])
+        return z2, p2
+
+    @staticmethod
+    def _lp2bp_zp(z: np.ndarray, p: np.ndarray, wo: float, bw: float) -> Tuple[np.ndarray, np.ndarray]:
+        degree = p.size - z.size
+
+        def quad_roots(x):
+            t = 0.5 * bw * x
+            r = np.sqrt(t*t - wo*wo)
+            return np.array([t + r, t - r], dtype=np.complex128)
+
+        z2 = np.concatenate([quad_roots(zz) for zz in z]) if z.size else np.array([], dtype=np.complex128)
+        p2 = np.concatenate([quad_roots(pp) for pp in p])
+
+        if degree > 0:
+            z2 = np.concatenate([z2, np.zeros(degree, dtype=np.complex128)])
+        return z2, p2
+
+    @staticmethod
+    def _lp2bs_zp(z: np.ndarray, p: np.ndarray, wo: float, bw: float) -> Tuple[np.ndarray, np.ndarray]:
+        degree = p.size - z.size
+
+        def quad_roots_inv(x):
+            t = 0.5 * bw / x
+            r = np.sqrt(t*t - wo*wo)
+            return np.array([t + r, t - r], dtype=np.complex128)
+
+        z2 = np.concatenate([quad_roots_inv(zz) for zz in z]) if z.size else np.array([], dtype=np.complex128)
+        p2 = np.concatenate([quad_roots_inv(pp) for pp in p])
+
+        if degree > 0:
+            z2 = np.concatenate([
+                z2,
+                1j * wo * np.ones(degree, dtype=np.complex128),
+                -1j * wo * np.ones(degree, dtype=np.complex128),
+            ])
+        return z2, p2
+
+    @staticmethod
+    def _bilinear_zp(z: np.ndarray, p: np.ndarray, fs: float) -> Tuple[np.ndarray, np.ndarray]:
+        fs2 = 2.0 * fs
+        degree = p.size - z.size
+
+        z_d = (fs2 + z) / (fs2 - z) if z.size else np.array([], dtype=np.complex128)
+        p_d = (fs2 + p) / (fs2 - p)
+
+        if degree > 0:
+            z_d = np.concatenate([z_d, -np.ones(degree, dtype=np.complex128)])  # zeros at infinity -> z=-1
+        return z_d, p_d
