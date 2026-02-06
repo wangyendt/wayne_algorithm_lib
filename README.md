@@ -1,5 +1,7 @@
 # pywayne: 强大的 Python 工具库 ✨
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/wangyendt/wayne_algorithm_lib)
+
 pywayne 是一款集成多种实用功能的工具库，旨在为 Python 与 C++ 开发提供全面支持。无论你在处理信号、数据结构、数学运算、图形可视化，还是在与飞书机器人、阿里云 OSS 或文本转语音(TTS)等领域工作，pywayne 都能提供一站式解决方案。
 
 ## 目录
