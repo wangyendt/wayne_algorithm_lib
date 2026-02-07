@@ -10,6 +10,7 @@
 
 import json
 import platform
+import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +18,177 @@ from typing import Dict, List, Optional, Tuple
 import lark_oapi as lark
 from lark_oapi.api.contact.v3 import *
 from lark_oapi.api.im.v1 import *
+
+_TABLE_SEP_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
+
+
+def _force_split_by_bytes(text: str, max_bytes: int, encoding: str = "utf-8") -> List[str]:
+    """
+    Force split a string by encoded byte length.
+    """
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be greater than 0")
+    if not text:
+        return []
+
+    out: List[str] = []
+    buf = ""
+    for ch in text:
+        candidate = buf + ch
+        if len(candidate.encode(encoding)) <= max_bytes:
+            buf = candidate
+            continue
+
+        if buf:
+            out.append(buf)
+        buf = ch
+
+    if buf:
+        out.append(buf)
+    return out
+
+
+def _chunk_by_bytes(text: str, max_bytes: int, encoding: str = "utf-8") -> List[str]:
+    """
+    Split text by paragraph first, then by line, ensuring each chunk's encoded bytes <= max_bytes.
+    """
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be greater than 0")
+    if not text:
+        return []
+    if len(text.encode(encoding)) <= max_bytes:
+        return [text]
+
+    parts = re.split(r"\n{2,}", text)
+    out: List[str] = []
+    buf = ""
+
+    for part in parts:
+        part = part.strip("\n")
+        if not part:
+            continue
+
+        candidate = f"{buf}\n\n{part}" if buf else part
+        if len(candidate.encode(encoding)) <= max_bytes:
+            buf = candidate
+            continue
+
+        if buf:
+            out.append(buf)
+            buf = ""
+
+        lines = part.splitlines()
+        tmp = ""
+        for line in lines:
+            candidate_line = f"{tmp}\n{line}" if tmp else line
+            if len(candidate_line.encode(encoding)) <= max_bytes:
+                tmp = candidate_line
+                continue
+
+            if tmp:
+                out.append(tmp)
+                tmp = ""
+
+            if len(line.encode(encoding)) <= max_bytes:
+                tmp = line
+            else:
+                out.extend(_force_split_by_bytes(line, max_bytes, encoding))
+
+        if tmp:
+            out.append(tmp)
+
+    if buf:
+        out.append(buf)
+
+    return out
+
+
+def _split_md_row(line: str) -> List[str]:
+    """
+    Split one markdown table row into cells.
+    """
+    content = line.strip().strip("|")
+    if not content:
+        return [""]
+    return [cell.strip() for cell in content.split("|")]
+
+
+def render_md_table_as_mono(table_md: str, max_col_width: int = 40) -> str:
+    """
+    Render a Markdown table as a fixed-width plain table.
+    """
+    lines = [ln.rstrip() for ln in table_md.splitlines() if ln.strip()]
+    if len(lines) < 2 or not _TABLE_SEP_RE.match(lines[1]):
+        return table_md
+
+    rows = [_split_md_row(lines[0])]
+    for line in lines[2:]:
+        if "|" not in line:
+            break
+        rows.append(_split_md_row(line))
+
+    ncol = max(len(row) for row in rows)
+    for row in rows:
+        if len(row) < ncol:
+            row.extend([""] * (ncol - len(row)))
+
+    def clip(value: str) -> str:
+        value = value.replace("\t", "  ")
+        if len(value) <= max_col_width:
+            return value
+        return value[: max_col_width - 1] + "..."
+
+    clipped_rows = [[clip(cell) for cell in row] for row in rows]
+    widths = [max(len(row[col]) for row in clipped_rows) for col in range(ncol)]
+
+    def format_row(row: List[str]) -> str:
+        return " | ".join(row[col].ljust(widths[col]) for col in range(ncol))
+
+    header = format_row(clipped_rows[0])
+    separator = "-+-".join("-" * width for width in widths)
+    body = "\n".join(format_row(row) for row in clipped_rows[1:])
+
+    if body:
+        return f"{header}\n{separator}\n{body}"
+    return f"{header}\n{separator}"
+
+
+def _split_md_blocks(md: str) -> List[Dict[str, str]]:
+    """
+    Split markdown into generic blocks and table blocks.
+    """
+    lines = md.splitlines()
+    out: List[Dict[str, str]] = []
+    buf: List[str] = []
+    idx = 0
+
+    while idx < len(lines):
+        line = lines[idx]
+
+        if "|" in line and idx + 1 < len(lines) and _TABLE_SEP_RE.match(lines[idx + 1]):
+            if "".join(buf).strip():
+                out.append({"kind": "md", "text": "\n".join(buf).strip("\n")})
+            buf = []
+
+            table_lines = [line, lines[idx + 1]]
+            idx += 2
+            while idx < len(lines):
+                row = lines[idx]
+                if not row.strip() or "|" not in row:
+                    break
+                table_lines.append(row)
+                idx += 1
+
+            out.append({"kind": "table", "text": "\n".join(table_lines).strip("\n")})
+            continue
+
+        buf.append(line)
+        idx += 1
+
+    if "".join(buf).strip():
+        out.append({"kind": "md", "text": "\n".join(buf).strip("\n")})
+
+    return out
 
 
 class TextContent:
@@ -317,6 +489,34 @@ class PostContent:
             "text": md_text
         }
 
+    def add_markdown(self,
+                     md: str,
+                     *,
+                     table_as: str = "code_block",
+                     max_chunk_bytes: int = 8_000,
+                     mono_max_col_width: int = 40) -> None:
+        """
+        Add markdown content with table-aware fallback and byte-size chunking.
+
+        Args:
+            md (str): Markdown text.
+            table_as (str): Table render mode, either "code_block" or "md".
+            max_chunk_bytes (int): Max encoded bytes per inserted block.
+            mono_max_col_width (int): Max table column width when table_as is "code_block".
+        """
+        if table_as not in {"code_block", "md"}:
+            raise ValueError("table_as must be either 'code_block' or 'md'")
+
+        for block in _split_md_blocks(md):
+            if block["kind"] == "table" and table_as == "code_block":
+                mono = render_md_table_as_mono(block["text"], max_col_width=mono_max_col_width)
+                for part in _chunk_by_bytes(mono, max_chunk_bytes):
+                    self.add_content_in_new_line(self.make_code_block_content("text", part))
+                continue
+
+            for part in _chunk_by_bytes(block["text"], max_chunk_bytes):
+                self.add_content_in_new_line(self.make_markdown_content(part))
+
     def add_content_in_line(self, content: Dict) -> None:
         """
         Add content to the current line.
@@ -381,6 +581,70 @@ class PostContent:
                 print(f"Unsupported operating system: {system_name}")
         except Exception as e:
             print(f"Failed to open webpage: {e}")
+
+
+class CardContentV2:
+    """
+    Helper class for constructing schema=2.0 interactive cards.
+    """
+
+    def __init__(self, title: str = "", template: str = "blue"):
+        """
+        Initialize a minimal schema=2.0 card structure.
+        """
+        self.card: Dict = {
+            "schema": "2.0",
+            "config": {
+                "update_multi": True,
+            },
+            "body": {
+                "direction": "vertical",
+                "padding": "12px 12px 12px 12px",
+                "elements": []
+            }
+        }
+
+        if title:
+            self.card["header"] = {
+                "title": {
+                    "tag": "plain_text",
+                    "content": title
+                },
+                "template": template
+            }
+
+    def add_markdown(self, md: str, *, max_chunk_bytes: int = 18_000) -> None:
+        """
+        Add markdown elements to card body with byte-size chunking.
+        """
+        for part in _chunk_by_bytes(md, max_chunk_bytes):
+            self.card["body"]["elements"].append({
+                "tag": "markdown",
+                "content": part
+            })
+
+    def add_hr(self) -> None:
+        """
+        Add a horizontal divider to card body.
+        """
+        self.card["body"]["elements"].append({"tag": "hr"})
+
+    def add_image(self, img_key: str, *, size: str = "large", preview: bool = True) -> None:
+        """
+        Add an image element to card body.
+        """
+        self.card["body"]["elements"].append({
+            "tag": "img",
+            "img_key": img_key,
+            "size": size,
+            "preview": preview
+        })
+
+    def get_card(self) -> Dict:
+        """
+        Return the complete card payload.
+        """
+        return self.card
 
 
 class LarkBot:
@@ -902,6 +1166,60 @@ class LarkBot:
             'post',
             json.dumps(post_content, ensure_ascii=False)
         )
+
+    def send_markdown_to_chat(self,
+                              chat_id: str,
+                              md_text: str,
+                              *,
+                              title: str = "",
+                              prefer: str = "card_v2",
+                              table_fallback: str = "code_block",
+                              max_message_bytes: Optional[int] = None) -> List[Dict]:
+        """
+        Send markdown content to chat with auto route and byte-size auto chunking.
+
+        Args:
+            chat_id (str): Chat ID.
+            md_text (str): Markdown text.
+            title (str): Optional message/card title.
+            prefer (str): "card_v2" or "post".
+            table_fallback (str): Table render mode for post route ("code_block" or "md").
+            max_message_bytes (Optional[int]): Optional per-message byte limit.
+
+        Returns:
+            List[Dict]: API responses for all sent message chunks.
+        """
+        normalized_prefer = prefer.lower()
+        if normalized_prefer not in {"card_v2", "post"}:
+            raise ValueError("prefer must be either 'card_v2' or 'post'")
+        if table_fallback not in {"code_block", "md"}:
+            raise ValueError("table_fallback must be either 'code_block' or 'md'")
+        if not md_text:
+            return []
+
+        default_limit = 18_000 if normalized_prefer == "card_v2" else 8_000
+        chunk_limit = max_message_bytes or default_limit
+        text_chunks = _chunk_by_bytes(md_text, chunk_limit)
+
+        responses: List[Dict] = []
+        total_chunks = len(text_chunks)
+
+        for idx, chunk in enumerate(text_chunks, start=1):
+            chunk_title = title
+            if title and total_chunks > 1:
+                chunk_title = f"{title} ({idx}/{total_chunks})"
+
+            if normalized_prefer == "card_v2":
+                card = CardContentV2(title=chunk_title)
+                card.add_markdown(chunk, max_chunk_bytes=chunk_limit)
+                responses.append(self.send_interactive_to_chat(chat_id, card.get_card()))
+                continue
+
+            post = PostContent(title=chunk_title)
+            post.add_markdown(chunk, table_as=table_fallback, max_chunk_bytes=chunk_limit)
+            responses.append(self.send_post_to_chat(chat_id, post.get_content()))
+
+        return responses
 
     def upload_image(self, image_path: str) -> str:
         """
