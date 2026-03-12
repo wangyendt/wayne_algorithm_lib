@@ -12,6 +12,16 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
 - **可靠的代码质量**：严格的代码审查和测试保证
 - **活跃的维护更新**：持续改进和功能扩展
 
+近期重点能力
+------------
+
+如果你主要关注消息平台和机器人能力，当前文档已经覆盖这一批高频能力：
+
+- 飞书应用机器人：主动发消息、Markdown 自动路由、引用回复、reaction、置顶、群管理、批量发送、资源上传下载
+- 飞书监听器：文本 / 图片 / 文件 / 音频 / 媒体 / post / interactive 监听，消息撤回、已读、reaction、群成员变更、卡片回调
+- 飞书自定义机器人：Webhook 文本 / post / 图片 / interactive 卡片推送
+- LLM 与消息平台组合：可与 ``pywayne.llm`` 组合实现问答机器人、事件驱动消息流
+
 安装
 ------------
 
@@ -92,16 +102,22 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
 
 .. toctree::
    :maxdepth: 2
+   :caption: AI 与消息平台:
+   :name: ai-messaging
+
+   modules/llm
+   modules/lark_bot
+   modules/lark_bot_listener
+   modules/lark_custom_bot
+
+.. toctree::
+   :maxdepth: 2
    :caption: 通信与存储:
    :name: communication-storage
 
    modules/adb
    modules/aliyun_oss
    modules/cross_comm
-   modules/llm
-   modules/lark_bot
-   modules/lark_bot_listener
-   modules/lark_custom_bot
    modules/tts
 
 .. toctree::

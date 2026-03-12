@@ -31,6 +31,7 @@ core_reqs = [
     "natsort",
     "sortedcontainers",
     "tqdm",
+    "watchdog",
     "numpy",
     "pandas",
     "matplotlib",
@@ -41,7 +42,15 @@ core_reqs = [
     "pyyaml",
     "requests",
     "websockets",
-    "python-dotenv"
+    "python-dotenv",
+    "pillow",
+    "oss2",
+    "h5py",
+    "seaborn",
+    "pyperclip",
+    "statsmodels",
+    "lark-oapi",
+    "cryptography",
 ]
 
 # 定义可选依赖
@@ -72,12 +81,9 @@ setuptools.setup(
     extras_require={
         'full': optional_reqs,
         'gui': ["easygui", "pynput"],
-        'image': ["pillow"],
-        'aws': ["boto3", "botocore", "oss2"],
-        'data': ["h5py", "seaborn", "pyperclip", "statsmodels"],
+        'aws': ["boto3", "botocore"],
         'geo': ["concave_hull", "alphashape", "shapely"],
-        'bot': ["lark-oapi", 'gtts'],
-        'crypto': ["cryptography"]
+        'tts': ["gtts"],
     },
     packages=setuptools.find_packages(),
     python_requires='>=3',

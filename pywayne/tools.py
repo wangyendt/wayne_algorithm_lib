@@ -1,8 +1,10 @@
 import datetime
 import functools
+import hashlib
 import inspect
 import logging
 import os
+import pickle
 import platform
 import pprint
 import random
@@ -10,16 +12,17 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from pathlib import Path
 from typing import *
 
 import matplotlib.pyplot as plt
 import yaml
 from filelock import FileLock
-
-try:
-    from PIL import Image
-except ImportError:
-    logging.warn('Try pip install Pillow')
+from PIL import Image
+from tqdm import tqdm
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 
 # try:
@@ -618,3 +621,464 @@ def say(text, lang='zh'):
     thd = threading.Thread(target=os.system, args=(command,))
     thd.setDaemon(True)
     thd.start()
+
+
+def retry(
+        max_tries: int = 3,
+        delay: float = 1.0,
+        backoff: float = 2.0,
+        exceptions: Tuple[Type[BaseException], ...] = (Exception,),
+        on_retry: Optional[Callable[[BaseException, int], None]] = None
+):
+    """
+    重试装饰器，支持指数退避。
+
+    :param max_tries: 最大尝试次数（含第一次调用）。
+    :param delay: 首次重试前的等待秒数。
+    :param backoff: 每次重试后等待时间的倍增系数。
+    :param exceptions: 需要触发重试的异常类型元组。
+    :param on_retry: 每次重试前调用的可选回调 ``(exception, attempt)``。
+
+    Usage::
+
+        @retry(max_tries=5, delay=0.5, backoff=2.0, exceptions=(IOError, TimeoutError))
+        def flaky_request():
+            ...
+
+        # 也可以不带参数使用默认值
+        @retry()
+        def another_func():
+            ...
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            current_delay = delay
+            last_exc: Optional[BaseException] = None
+            for attempt in range(1, max_tries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as exc:
+                    last_exc = exc
+                    if attempt == max_tries:
+                        break
+                    if on_retry is not None:
+                        on_retry(exc, attempt)
+                    else:
+                        wayne_print(
+                            f"[retry] {func.__name__} 第 {attempt}/{max_tries} 次失败: {exc}，"
+                            f"{current_delay:.1f}s 后重试...",
+                            "yellow"
+                        )
+                    time.sleep(current_delay)
+                    current_delay *= backoff
+            raise last_exc
+
+        return wrapper
+
+    return decorator
+
+
+def disk_cache(
+        ttl: Optional[float] = None,
+        cache_dir: Optional[str] = None,
+        ignore_kwargs: Optional[List[str]] = None
+):
+    """
+    磁盘缓存装饰器，基于 pickle 持久化，支持 TTL 过期。
+
+    :param ttl: 缓存有效期（秒）。``None`` 表示永不过期。
+    :param cache_dir: 缓存目录，默认 ``~/.wayne_cache``。
+    :param ignore_kwargs: 计算缓存键时忽略的关键字参数名列表。
+
+    被装饰的函数会额外获得两个属性：
+    - ``func.cache_clear()``  — 清除该函数所有缓存文件
+    - ``func.cache_dir``      — 缓存目录路径字符串
+
+    Usage::
+
+        @disk_cache(ttl=3600)
+        def expensive_query(url: str) -> dict:
+            ...
+
+        @disk_cache()           # 永不过期
+        def compute(x, y):
+            ...
+
+        compute.cache_clear()   # 手动清除缓存
+    """
+
+    def decorator(func: Callable) -> Callable:
+        _cache_root = Path(cache_dir or os.path.expanduser('~/.wayne_cache'))
+        _cache_root.mkdir(parents=True, exist_ok=True)
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            filtered_kw = {k: v for k, v in kwargs.items() if k not in (ignore_kwargs or [])}
+            key_src = f"{func.__module__}.{func.__qualname__}|{repr(args)}|{repr(sorted(filtered_kw.items()))}"
+            cache_key = hashlib.md5(key_src.encode('utf-8')).hexdigest()
+            cache_file = _cache_root / f"{func.__name__}_{cache_key}.pkl"
+
+            if cache_file.exists():
+                try:
+                    with open(cache_file, 'rb') as f:
+                        cached_ts, cached_result = pickle.load(f)
+                    if ttl is None or (time.time() - cached_ts) < ttl:
+                        return cached_result
+                except Exception:
+                    pass
+
+            result = func(*args, **kwargs)
+            try:
+                with open(cache_file, 'wb') as f:
+                    pickle.dump((time.time(), result), f)
+            except Exception as e:
+                wayne_print(f"[disk_cache] 写入缓存失败: {e}", "yellow")
+            return result
+
+        def cache_clear():
+            for f in _cache_root.glob(f"{func.__name__}_*.pkl"):
+                f.unlink(missing_ok=True)
+            wayne_print(f"[disk_cache] 已清除 {func.__name__} 的所有缓存", "cyan")
+
+        wrapper.cache_clear = cache_clear
+        wrapper.cache_dir = str(_cache_root)
+        return wrapper
+
+    return decorator
+
+
+def parallel_map(
+        func: Callable,
+        items: Iterable,
+        n_workers: int = 8,
+        mode: str = 'thread',
+        show_progress: bool = False,
+        desc: str = '',
+        timeout: Optional[float] = None
+) -> List:
+    """
+    对列表中每个元素并发执行函数，保序返回结果。
+
+    :param func: 要执行的函数，签名为 ``func(item) -> result``。
+    :param items: 输入序列。
+    :param n_workers: 并发工作线程/进程数。
+    :param mode: ``'thread'``（I/O 密集）或 ``'process'``（CPU 密集）。
+    :param show_progress: 是否显示 tqdm 进度条（需安装 tqdm）。
+    :param desc: 进度条描述文字。
+    :param timeout: 单个任务超时秒数（None 为不限）。
+    :return: 与 ``items`` 等长、保序的结果列表。
+
+    Usage::
+
+        results = parallel_map(download, url_list, n_workers=16, show_progress=True)
+
+        results = parallel_map(heavy_compute, data, n_workers=4, mode='process')
+    """
+    items_list = list(items)
+    if not items_list:
+        return []
+
+    executor_cls = ThreadPoolExecutor if mode == 'thread' else ProcessPoolExecutor
+    results: List[Any] = [None] * len(items_list)
+
+    _progress = tqdm(total=len(items_list), desc=desc or func.__name__) if show_progress else None
+
+    try:
+        with executor_cls(max_workers=n_workers) as executor:
+            future_to_idx = {
+                executor.submit(func, item): idx
+                for idx, item in enumerate(items_list)
+            }
+            for future in as_completed(future_to_idx, timeout=timeout):
+                idx = future_to_idx[future]
+                results[idx] = future.result()
+                if _progress is not None:
+                    _progress.update(1)
+    finally:
+        if _progress is not None:
+            _progress.close()
+
+    return results
+
+
+def with_progress(desc: str = '', unit: str = 'it', total: Optional[int] = None):
+    """
+    装饰器：将被装饰函数的第一个可迭代参数包裹上 tqdm 进度条。
+    若 tqdm 未安装则静默跳过，不影响函数执行。
+
+    :param desc: 进度条描述文字，默认使用函数名。
+    :param unit: 进度条单位字符串。
+    :param total: 强制指定总量（None 时自动从 ``len()`` 推断）。
+
+    Usage::
+
+        @with_progress(desc="处理帧")
+        def process_frames(frames: list):
+            for frame in frames:   # frames 已被 tqdm 包裹
+                ...
+
+        # 直接包裹迭代器
+        for item in progress_iter(my_list, desc="下载"):
+            ...
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            new_args = list(args)
+            if new_args:
+                first = new_args[0]
+                if hasattr(first, '__iter__') and not isinstance(first, (str, bytes)):
+                    _total = total
+                    if _total is None and hasattr(first, '__len__'):
+                        _total = len(first)
+                    new_args[0] = tqdm(first, desc=desc or func.__name__, total=_total, unit=unit)
+            return func(*new_args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def progress_iter(iterable: Iterable, desc: str = '', total: Optional[int] = None, unit: str = 'it') -> Iterable:
+    """
+    将任意可迭代对象包裹上 tqdm 进度条并返回。
+    若 tqdm 未安装则原样返回，不抛异常。
+
+    :param iterable: 输入可迭代对象。
+    :param desc: 进度条描述文字。
+    :param total: 强制指定总量（None 时自动从 ``len()`` 推断）。
+    :param unit: 进度条单位字符串。
+
+    Usage::
+
+        for img_path in progress_iter(paths, desc="加载图片"):
+            process(img_path)
+    """
+    _total = total
+    if _total is None and hasattr(iterable, '__len__'):
+        _total = len(iterable)
+    return tqdm(iterable, desc=desc, total=_total, unit=unit)
+
+
+class FileWatcher:
+    """
+    监视文件或目录的变化，变化时触发回调（基于 watchdog，事件驱动）。
+
+    :param path: 要监视的文件或目录路径。
+    :param on_created: 新文件创建时的回调 ``(file_path: str) -> None``。
+    :param on_modified: 文件内容修改时的回调 ``(file_path: str) -> None``。
+    :param on_deleted: 文件删除时的回调 ``(file_path: str) -> None``。
+    :param extensions: 只关注指定后缀名（如 ``['.jpg', '.png']``），空列表表示监听所有文件。
+    :param recursive: 是否递归监视子目录（仅在 ``path`` 为目录时有效）。
+
+    支持上下文管理器协议::
+
+        with FileWatcher("/data/logs", on_modified=handle_mod, extensions=[".log"]) as w:
+            time.sleep(60)
+
+    也可手动控制::
+
+        w = FileWatcher("/tmp/results", on_created=on_new_file)
+        w.start()
+        ...
+        w.stop()
+    """
+
+    def __init__(
+            self,
+            path: str,
+            on_created: Optional[Callable[[str], None]] = None,
+            on_modified: Optional[Callable[[str], None]] = None,
+            on_deleted: Optional[Callable[[str], None]] = None,
+            extensions: Optional[List[str]] = None,
+            recursive: bool = False
+    ):
+        self.path = os.path.abspath(path)
+        self.on_created = on_created
+        self.on_modified = on_modified
+        self.on_deleted = on_deleted
+        self.extensions = [ext.lower().lstrip('.') for ext in (extensions or [])]
+        self.recursive = recursive
+        self._observer: Optional[Observer] = None
+
+    def _should_notify(self, path: str) -> bool:
+        if not self.extensions:
+            return True
+        return any(path.lower().endswith('.' + ext) for ext in self.extensions)
+
+    def start(self) -> 'FileWatcher':
+        """在后台线程中启动监视，返回 self 支持链式调用。"""
+        watcher = self
+
+        class _Handler(FileSystemEventHandler):
+            def on_created(self, event):
+                if not event.is_directory and watcher._should_notify(event.src_path):
+                    if watcher.on_created:
+                        watcher.on_created(event.src_path)
+
+            def on_modified(self, event):
+                if not event.is_directory and watcher._should_notify(event.src_path):
+                    if watcher.on_modified:
+                        watcher.on_modified(event.src_path)
+
+            def on_deleted(self, event):
+                if not event.is_directory and watcher._should_notify(event.src_path):
+                    if watcher.on_deleted:
+                        watcher.on_deleted(event.src_path)
+
+        watch_path = self.path if os.path.isdir(self.path) else os.path.dirname(self.path)
+        self._observer = Observer()
+        self._observer.schedule(_Handler(), watch_path, recursive=self.recursive)
+        self._observer.start()
+        wayne_print(f"[FileWatcher] 开始监视: {self.path}", "cyan")
+        return self
+
+    def stop(self) -> None:
+        """停止监视并等待后台线程退出。"""
+        if self._observer is not None:
+            self._observer.stop()
+            self._observer.join()
+        wayne_print(f"[FileWatcher] 已停止监视: {self.path}", "cyan")
+
+    def __enter__(self) -> 'FileWatcher':
+        return self.start()
+
+    def __exit__(self, *_) -> None:
+        self.stop()
+
+
+def wayne_print_table(
+        data: List[List],
+        headers: Optional[List[str]] = None,
+        align: Optional[List[str]] = None,
+        title: Optional[str] = None,
+        border: str = 'unicode',
+        color: str = 'default',
+        bold_header: bool = False,
+) -> None:
+    """
+    在终端打印带边框的格式化表格，支持颜色和表头加粗。
+
+    :param data: 二维列表，每个子列表为一行数据。
+    :param headers: 列名列表。``None`` 表示无表头。
+    :param align: 每列对齐方式列表，可选 ``'left'``、``'right'``、``'center'``，
+                  默认全部左对齐。
+    :param title: 表格标题，显示在顶部居中位置。
+    :param border: 边框风格，``'unicode'``（默认，带框线）或 ``'simple'``（纯 ASCII）。
+    :param color: 整体颜色，与 ``wayne_print`` 颜色名一致（``'default'``、``'red'``、
+                  ``'green'``、``'yellow'``、``'blue'``、``'magenta'``、``'cyan'``、``'white'``）。
+    :param bold_header: 表头是否加粗，默认 ``False``。
+
+    Usage::
+
+        wayne_print_table(
+            data=[["ResNet50", "92.3%", "45ms"],
+                  ["MobileNet", "88.1%", "12ms"]],
+            headers=["模型", "准确率", "延迟"],
+            align=["left", "right", "right"],
+            title="模型对比",
+            color="cyan",
+            bold_header=True,
+        )
+    """
+    if not data and not headers:
+        return
+
+    _COLORS = {
+        "default": "\033[0m",
+        "red":     "\033[31m",
+        "green":   "\033[32m",
+        "yellow":  "\033[33m",
+        "blue":    "\033[34m",
+        "magenta": "\033[35m",
+        "cyan":    "\033[36m",
+        "white":   "\033[37m",
+    }
+    _BOLD  = "\033[1m"
+    _RESET = "\033[0m"
+    color_code = _COLORS.get(color, _COLORS["default"])
+
+    rows = [[str(cell) for cell in row] for row in data]
+    head = [str(h) for h in headers] if headers else []
+
+    ncols = max((len(row) for row in rows), default=0)
+    if head:
+        ncols = max(ncols, len(head))
+
+    for row in rows:
+        while len(row) < ncols:
+            row.append('')
+    if head:
+        while len(head) < ncols:
+            head.append('')
+
+    # 宽度按原始字符串计算（不含 ANSI 码）
+    col_widths = [0] * ncols
+    for col in range(ncols):
+        if head:
+            col_widths[col] = max(col_widths[col], len(head[col]))
+        for row in rows:
+            col_widths[col] = max(col_widths[col], len(row[col]))
+
+    aligns = list(align or []) + ['left'] * ncols
+    aligns = aligns[:ncols]
+
+    def _fmt(text: str, width: int, a: str) -> str:
+        if a == 'right':
+            return text.rjust(width)
+        if a == 'center':
+            return text.center(width)
+        return text.ljust(width)
+
+    if border == 'unicode':
+        tl, tr, bl, br = '┌', '┐', '└', '┘'
+        lj, rj, tj, bj, cj = '├', '┤', '┬', '┴', '┼'
+        h_ch, v_ch = '─', '│'
+    else:
+        tl = tr = bl = br = lj = rj = tj = bj = cj = '+'
+        h_ch, v_ch = '-', '|'
+
+    sep = tj if border == 'unicode' else '+'
+
+    def _hline(left, right, inner) -> str:
+        return left + inner.join(h_ch * (w + 2) for w in col_widths) + right
+
+    top_line = _hline(tl, tr, sep)
+    mid_line = _hline(lj, rj, cj)
+    bot_line = _hline(bl, br, bj if border == 'unicode' else '+')
+
+    total_width = sum(col_widths) + 3 * ncols + 1
+    lines: List[str] = []
+
+    if title:
+        lines.append(_hline(tl, tr, h_ch))
+        lines.append(f"{v_ch} {title.center(total_width - 4)} {v_ch}")
+        lines.append(_hline(lj, rj, sep) if (head or rows) else bot_line)
+    else:
+        lines.append(top_line)
+
+    def _row_line(cells: List[str], is_header: bool = False) -> str:
+        parts = []
+        for c in range(ncols):
+            cell = _fmt(cells[c], col_widths[c], aligns[c])
+            if is_header and bold_header:
+                cell = f"{_BOLD}{cell}{_RESET}{color_code}"
+            parts.append(f" {cell} ")
+        return v_ch + v_ch.join(parts) + v_ch
+
+    if head:
+        lines.append(_row_line(head, is_header=True))
+        lines.append(mid_line)
+
+    for row in rows:
+        lines.append(_row_line(row))
+
+    lines.append(bot_line)
+
+    output = '\n'.join(lines)
+    if color != 'default':
+        output = f"{color_code}{output}{_RESET}"
+    print(output)

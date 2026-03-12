@@ -13,6 +13,7 @@ scipy
 seaborn
 sortedcontainers
 tqdm
+watchdog
 
 pillow
 pyyaml
@@ -27,7 +28,8 @@ alphashape
 shapely
 
 gtts
-lark_oapi
+lark-oapi
+cryptography
 
 statsmodels
 

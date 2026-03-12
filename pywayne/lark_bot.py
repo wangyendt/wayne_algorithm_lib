@@ -14,12 +14,31 @@ import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import lark_oapi as lark
+import requests
 from lark_oapi.api.contact.v3 import *
 from lark_oapi.api.im.v1 import *
+from pywayne.tools import wayne_print
 
 _TABLE_SEP_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
+
+
+def _print_info(text: str) -> None:
+    wayne_print(text, color="cyan")
+
+
+def _print_success(text: str) -> None:
+    wayne_print(text, color="green", bold=True)
+
+
+def _print_warn(text: str) -> None:
+    wayne_print(text, color="yellow", bold=True)
+
+
+def _print_error(text: str) -> None:
+    wayne_print(text, color="red", bold=True)
 
 
 def _force_split_by_bytes(text: str, max_bytes: int, encoding: str = "utf-8") -> List[str]:
@@ -578,9 +597,9 @@ class PostContent:
             elif system_name == "Linux":
                 subprocess.run(["xdg-open", url])
             else:
-                print(f"Unsupported operating system: {system_name}")
+                _print_warn(f"Unsupported operating system: {system_name}")
         except Exception as e:
-            print(f"Failed to open webpage: {e}")
+            _print_error(f"Failed to open webpage: {e}")
 
 
 class CardContentV2:
@@ -661,11 +680,79 @@ class LarkBot:
             app_id (str): Feishu application ID.
             app_secret (str): Feishu application secret.
         """
+        self.app_id = app_id
+        self.app_secret = app_secret
         self.client = lark.Client.builder() \
             .app_id(app_id) \
             .app_secret(app_secret) \
             .log_level(lark.LogLevel.DEBUG) \
             .build()
+
+    @staticmethod
+    def _dump_message_content(content: Union[str, Dict[str, Any], List[Any]]) -> str:
+        """
+        Normalize message content to Feishu API's JSON string format.
+        """
+        if isinstance(content, str):
+            return content
+        return json.dumps(content, ensure_ascii=False)
+
+    @staticmethod
+    def _response_to_dict(response, action: str) -> Dict:
+        """
+        Convert an SDK response object to a plain dict with consistent error logging.
+        """
+        if not response.success():
+            lark.logger.error(
+                f"{action} failed, code: {response.code}, msg: {response.msg}, "
+                f"log_id: {response.get_log_id()}"
+            )
+            return {}
+
+        if response.data is None:
+            return {}
+
+        response_data = json.loads(lark.JSON.marshal(response.data, indent=4))
+        lark.logger.info(response_data)
+        return response_data
+
+    def _get_tenant_access_token(self) -> str:
+        """
+        Fetch a tenant access token for APIs not exposed by the installed SDK.
+        """
+        response = requests.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            json={"app_id": self.app_id, "app_secret": self.app_secret},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code", 0) != 0:
+            raise RuntimeError(f"get tenant access token failed: {data}")
+        return data["tenant_access_token"]
+
+    def _post_open_api_json(self, path: str, payload: Dict[str, Any]) -> Dict:
+        """
+        Send a raw JSON POST request to Feishu OpenAPI.
+        """
+        token = self._get_tenant_access_token()
+        response = requests.post(
+            f"https://open.feishu.cn/open-apis{path}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code", 0) != 0:
+            lark.logger.error(f"raw api request failed for {path}: {data}")
+            return {}
+        lark.logger.info(data)
+        return data
 
     def get_user_info(self, emails: List[str], mobiles: List[str]) -> Optional[Dict]:
         """
@@ -1221,6 +1308,487 @@ class LarkBot:
 
         return responses
 
+    def reply_message(self,
+                      message_id: str,
+                      msg_type: str,
+                      content: Union[str, Dict[str, Any], List[Any]],
+                      *,
+                      reply_in_thread: bool = False,
+                      uuid: str = "") -> Dict:
+        """
+        Reply to a message, optionally in thread mode.
+        """
+        request_body_builder = ReplyMessageRequestBody.builder() \
+            .msg_type(msg_type) \
+            .content(self._dump_message_content(content)) \
+            .reply_in_thread(reply_in_thread)
+        if uuid:
+            request_body_builder = request_body_builder.uuid(uuid)
+
+        request = ReplyMessageRequest.builder() \
+            .message_id(message_id) \
+            .request_body(request_body_builder.build()) \
+            .build()
+
+        response = self.client.im.v1.message.reply(request)
+        return self._response_to_dict(response, "reply_message")
+
+    def forward_message(self,
+                        message_id: str,
+                        receive_id: str,
+                        *,
+                        receive_id_type: str = "chat_id",
+                        uuid: str = "") -> Dict:
+        """
+        Forward an existing message to a user or chat.
+        """
+        request_builder = ForwardMessageRequest.builder() \
+            .receive_id_type(receive_id_type) \
+            .message_id(message_id) \
+            .request_body(ForwardMessageRequestBody.builder().receive_id(receive_id).build())
+        if uuid:
+            request_builder = request_builder.uuid(uuid)
+
+        response = self.client.im.v1.message.forward(request_builder.build())
+        return self._response_to_dict(response, "forward_message")
+
+    def recall_message(self, message_id: str) -> Dict:
+        """
+        Recall a message sent by the bot.
+        """
+        request = DeleteMessageRequest.builder().message_id(message_id).build()
+        response = self.client.im.v1.message.delete(request)
+        return self._response_to_dict(response, "recall_message")
+
+    def get_message(self, message_id: str, *, user_id_type: str = "open_id") -> Dict:
+        """
+        Get message details by message_id.
+        """
+        request = GetMessageRequest.builder() \
+            .message_id(message_id) \
+            .user_id_type(user_id_type) \
+            .build()
+        response = self.client.im.v1.message.get(request)
+        return self._response_to_dict(response, "get_message")
+
+    def get_message_list(self,
+                         chat_id: str,
+                         start_time: str,
+                         end_time: str,
+                         *,
+                         sort_type: str = "",
+                         page_size: int = 50,
+                         page_token: str = "") -> Dict:
+        """
+        List historical messages in a chat.
+        """
+        request_builder = ListMessageRequest.builder() \
+            .container_id_type("chat") \
+            .container_id(chat_id) \
+            .start_time(start_time) \
+            .end_time(end_time) \
+            .page_size(page_size)
+        if sort_type:
+            request_builder = request_builder.sort_type(sort_type)
+        if page_token:
+            request_builder = request_builder.page_token(page_token)
+
+        response = self.client.im.v1.message.list(request_builder.build())
+        return self._response_to_dict(response, "get_message_list")
+
+    def update_message(self,
+                       message_id: str,
+                       msg_type: str,
+                       content: Union[str, Dict[str, Any], List[Any]]) -> Dict:
+        """
+        Replace the content of an existing message.
+        """
+        request = UpdateMessageRequest.builder() \
+            .message_id(message_id) \
+            .request_body(UpdateMessageRequestBody.builder()
+                          .msg_type(msg_type)
+                          .content(self._dump_message_content(content))
+                          .build()) \
+            .build()
+        response = self.client.im.v1.message.update(request)
+        return self._response_to_dict(response, "update_message")
+
+    def patch_message(self,
+                      message_id: str,
+                      content: Union[str, Dict[str, Any], List[Any]]) -> Dict:
+        """
+        Partially update message content, commonly used for interactive cards.
+        """
+        request = PatchMessageRequest.builder() \
+            .message_id(message_id) \
+            .request_body(PatchMessageRequestBody.builder()
+                          .content(self._dump_message_content(content))
+                          .build()) \
+            .build()
+        response = self.client.im.v1.message.patch(request)
+        return self._response_to_dict(response, "patch_message")
+
+    def update_interactive_card(self, message_id: str, card: Dict[str, Any]) -> Dict:
+        """
+        Update an existing interactive card in-place.
+        """
+        return self.patch_message(message_id, card)
+
+    def get_message_read_users(self,
+                               message_id: str,
+                               *,
+                               user_id_type: str = "open_id",
+                               page_size: int = 50,
+                               page_token: str = "") -> Dict:
+        """
+        Get read-receipt users for a message.
+        """
+        request_builder = ReadUsersMessageRequest.builder() \
+            .message_id(message_id) \
+            .user_id_type(user_id_type) \
+            .page_size(page_size)
+        if page_token:
+            request_builder = request_builder.page_token(page_token)
+
+        response = self.client.im.v1.message.read_users(request_builder.build())
+        return self._response_to_dict(response, "get_message_read_users")
+
+    def urgent_message(self,
+                       message_id: str,
+                       urgent_type: str,
+                       user_open_ids: List[str],
+                       *,
+                       user_id_type: str = "open_id") -> Dict:
+        """
+        Send an urgent notification for an existing message.
+        """
+        urgent_receivers = UrgentReceivers.builder().user_id_list(user_open_ids).build()
+        normalized_type = urgent_type.lower()
+
+        if normalized_type == "app":
+            request = UrgentAppMessageRequest.builder() \
+                .message_id(message_id) \
+                .user_id_type(user_id_type) \
+                .request_body(urgent_receivers) \
+                .build()
+            response = self.client.im.v1.message.urgent_app(request)
+        elif normalized_type == "phone":
+            request = UrgentPhoneMessageRequest.builder() \
+                .message_id(message_id) \
+                .user_id_type(user_id_type) \
+                .request_body(urgent_receivers) \
+                .build()
+            response = self.client.im.v1.message.urgent_phone(request)
+        elif normalized_type == "sms":
+            request = UrgentSmsMessageRequest.builder() \
+                .message_id(message_id) \
+                .user_id_type(user_id_type) \
+                .request_body(urgent_receivers) \
+                .build()
+            response = self.client.im.v1.message.urgent_sms(request)
+        else:
+            raise ValueError("urgent_type must be one of: app, phone, sms")
+
+        return self._response_to_dict(response, f"urgent_message[{normalized_type}]")
+
+    def add_reaction(self, message_id: str, emoji_type: str) -> Dict:
+        """
+        Add an emoji reaction to a message.
+
+        Notes:
+            - `emoji_type` uses Feishu's message-reaction emoji code, not the visual emoji glyph.
+            - Commonly used values include: `THUMBSUP`, `OK`, `HEART`, `HAHA`.
+            - The full supported list is maintained by Feishu and can be opened with
+              `PostContent.list_emoji_types()`, which jumps to:
+              https://open.feishu.cn/document/server-docs/im-v1/message-reaction/emojis-introduce
+        """
+        request = CreateMessageReactionRequest.builder() \
+            .message_id(message_id) \
+            .request_body(CreateMessageReactionRequestBody.builder()
+                          .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
+                          .build()) \
+            .build()
+        response = self.client.im.v1.message_reaction.create(request)
+        return self._response_to_dict(response, "add_reaction")
+
+    def delete_reaction(self, message_id: str, reaction_id: str) -> Dict:
+        """
+        Delete a previously added reaction from a message.
+        """
+        request = DeleteMessageReactionRequest.builder() \
+            .message_id(message_id) \
+            .reaction_id(reaction_id) \
+            .build()
+        response = self.client.im.v1.message_reaction.delete(request)
+        return self._response_to_dict(response, "delete_reaction")
+
+    def list_reactions(self,
+                       message_id: str,
+                       *,
+                       reaction_type: str = "",
+                       user_id_type: str = "open_id",
+                       page_size: int = 50,
+                       page_token: str = "") -> Dict:
+        """
+        List reactions on a message.
+        """
+        request_builder = ListMessageReactionRequest.builder() \
+            .message_id(message_id) \
+            .user_id_type(user_id_type) \
+            .page_size(page_size)
+        if reaction_type:
+            request_builder = request_builder.reaction_type(reaction_type)
+        if page_token:
+            request_builder = request_builder.page_token(page_token)
+
+        response = self.client.im.v1.message_reaction.list(request_builder.build())
+        return self._response_to_dict(response, "list_reactions")
+
+    def pin_message(self, message_id: str) -> Dict:
+        """
+        Pin a message in chat.
+        """
+        request = CreatePinRequest.builder() \
+            .request_body(CreatePinRequestBody.builder().message_id(message_id).build()) \
+            .build()
+        response = self.client.im.v1.pin.create(request)
+        return self._response_to_dict(response, "pin_message")
+
+    def unpin_message(self, message_id: str) -> Dict:
+        """
+        Unpin a message in chat.
+        """
+        request = DeletePinRequest.builder().message_id(message_id).build()
+        response = self.client.im.v1.pin.delete(request)
+        return self._response_to_dict(response, "unpin_message")
+
+    def list_pinned_messages(self,
+                             chat_id: str,
+                             *,
+                             start_time: str = "",
+                             end_time: str = "",
+                             page_size: int = 50,
+                             page_token: str = "") -> Dict:
+        """
+        List pinned messages in a chat.
+        """
+        request_builder = ListPinRequest.builder() \
+            .chat_id(chat_id) \
+            .page_size(page_size)
+        if start_time:
+            request_builder = request_builder.start_time(start_time)
+        if end_time:
+            request_builder = request_builder.end_time(end_time)
+        if page_token:
+            request_builder = request_builder.page_token(page_token)
+
+        response = self.client.im.v1.pin.list(request_builder.build())
+        return self._response_to_dict(response, "list_pinned_messages")
+
+    def create_chat(self,
+                    name: str,
+                    user_open_ids: List[str],
+                    description: str = "",
+                    *,
+                    avatar: str = "",
+                    owner_open_id: str = "",
+                    bot_ids: Optional[List[str]] = None,
+                    set_bot_manager: bool = False,
+                    uuid: str = "") -> Dict:
+        """
+        Create a new chat and optionally invite users/bots.
+        """
+        request_body_builder = CreateChatRequestBody.builder() \
+            .name(name) \
+            .description(description) \
+            .user_id_list(user_open_ids)
+        if avatar:
+            request_body_builder = request_body_builder.avatar(avatar)
+        if owner_open_id:
+            request_body_builder = request_body_builder.owner_id(owner_open_id)
+        if bot_ids:
+            request_body_builder = request_body_builder.bot_id_list(bot_ids)
+
+        request_builder = CreateChatRequest.builder() \
+            .user_id_type("open_id") \
+            .set_bot_manager(set_bot_manager) \
+            .request_body(request_body_builder.build())
+        if uuid:
+            request_builder = request_builder.uuid(uuid)
+
+        response = self.client.im.v1.chat.create(request_builder.build())
+        return self._response_to_dict(response, "create_chat")
+
+    def delete_chat(self, chat_id: str) -> Dict:
+        """
+        Delete a chat.
+        """
+        request = DeleteChatRequest.builder().chat_id(chat_id).build()
+        response = self.client.im.v1.chat.delete(request)
+        return self._response_to_dict(response, "delete_chat")
+
+    def update_chat(self,
+                    chat_id: str,
+                    *,
+                    name: str = "",
+                    description: str = "",
+                    avatar: str = "",
+                    owner_open_id: str = "") -> Dict:
+        """
+        Update basic chat information.
+        """
+        request_body_builder = UpdateChatRequestBody.builder()
+        if avatar:
+            request_body_builder = request_body_builder.avatar(avatar)
+        if name:
+            request_body_builder = request_body_builder.name(name)
+        if description:
+            request_body_builder = request_body_builder.description(description)
+        if owner_open_id:
+            request_body_builder = request_body_builder.owner_id(owner_open_id)
+
+        request = UpdateChatRequest.builder() \
+            .user_id_type("open_id") \
+            .chat_id(chat_id) \
+            .request_body(request_body_builder.build()) \
+            .build()
+        response = self.client.im.v1.chat.update(request)
+        return self._response_to_dict(response, "update_chat")
+
+    def add_members_to_chat(self,
+                            chat_id: str,
+                            user_open_ids: List[str],
+                            *,
+                            succeed_type: int = 0) -> Dict:
+        """
+        Add members to a chat.
+        """
+        request = CreateChatMembersRequest.builder() \
+            .member_id_type("open_id") \
+            .succeed_type(succeed_type) \
+            .chat_id(chat_id) \
+            .request_body(CreateChatMembersRequestBody.builder().id_list(user_open_ids).build()) \
+            .build()
+        response = self.client.im.v1.chat_members.create(request)
+        return self._response_to_dict(response, "add_members_to_chat")
+
+    def remove_members_from_chat(self, chat_id: str, user_open_ids: List[str]) -> Dict:
+        """
+        Remove members from a chat.
+        """
+        request = DeleteChatMembersRequest.builder() \
+            .member_id_type("open_id") \
+            .chat_id(chat_id) \
+            .request_body(DeleteChatMembersRequestBody.builder().id_list(user_open_ids).build()) \
+            .build()
+        response = self.client.im.v1.chat_members.delete(request)
+        return self._response_to_dict(response, "remove_members_from_chat")
+
+    def set_chat_admin(self, chat_id: str, user_open_ids: List[str], *, is_admin: bool = True) -> Dict:
+        """
+        Add or remove chat administrators.
+        """
+        if is_admin:
+            request = AddManagersChatManagersRequest.builder() \
+                .member_id_type("open_id") \
+                .chat_id(chat_id) \
+                .request_body(AddManagersChatManagersRequestBody.builder().manager_ids(user_open_ids).build()) \
+                .build()
+            response = self.client.im.v1.chat_managers.add_managers(request)
+            return self._response_to_dict(response, "set_chat_admin[add]")
+
+        request = DeleteManagersChatManagersRequest.builder() \
+            .member_id_type("open_id") \
+            .chat_id(chat_id) \
+            .request_body(DeleteManagersChatManagersRequestBody.builder().manager_ids(user_open_ids).build()) \
+            .build()
+        response = self.client.im.v1.chat_managers.delete_managers(request)
+        return self._response_to_dict(response, "set_chat_admin[remove]")
+
+    def transfer_chat_owner(self, chat_id: str, new_owner_open_id: str) -> Dict:
+        """
+        Transfer chat ownership to another member.
+        """
+        return self.update_chat(chat_id, owner_open_id=new_owner_open_id)
+
+    def get_chat_announcement(self, chat_id: str) -> Dict:
+        """
+        Get the current chat announcement.
+        """
+        request = GetChatAnnouncementRequest.builder() \
+            .user_id_type("open_id") \
+            .chat_id(chat_id) \
+            .build()
+        response = self.client.im.v1.chat_announcement.get(request)
+        return self._response_to_dict(response, "get_chat_announcement")
+
+    def set_chat_announcement(self,
+                              chat_id: str,
+                              *,
+                              requests: Union[str, List[str]],
+                              revision: str = "") -> Dict:
+        """
+        Patch chat announcement with raw request operations from Feishu's announcement API.
+        """
+        normalized_requests = [requests] if isinstance(requests, str) else requests
+        request = PatchChatAnnouncementRequest.builder() \
+            .chat_id(chat_id) \
+            .request_body(PatchChatAnnouncementRequestBody.builder()
+                          .revision(revision)
+                          .requests(normalized_requests)
+                          .build()) \
+            .build()
+        response = self.client.im.v1.chat_announcement.patch(request)
+        return self._response_to_dict(response, "set_chat_announcement")
+
+    def batch_send_message(self,
+                           msg_type: str,
+                           *,
+                           content: Optional[Union[str, Dict[str, Any], List[Any]]] = None,
+                           card: Optional[Dict[str, Any]] = None,
+                           user_open_ids: Optional[List[str]] = None,
+                           department_ids: Optional[List[str]] = None,
+                           user_ids: Optional[List[str]] = None,
+                           union_ids: Optional[List[str]] = None) -> Dict:
+        """
+        Batch-send a message to users or departments.
+
+        Notes:
+            - This uses Feishu's `/message/v4/batch_send/` endpoint.
+            - Batch messages cannot be updated or replied to.
+            - The endpoint only supports user/department targets, not chats.
+        """
+        normalized_type = msg_type.lower()
+        payload: Dict[str, Any] = {
+            "msg_type": normalized_type,
+            "open_ids": user_open_ids or [],
+            "department_ids": department_ids or [],
+            "user_ids": user_ids or [],
+            "union_ids": union_ids or [],
+        }
+
+        if normalized_type == "interactive":
+            if not card:
+                raise ValueError("card is required when msg_type='interactive'")
+            payload["card"] = card
+        else:
+            if content is None:
+                raise ValueError("content is required when msg_type is not 'interactive'")
+            if normalized_type == "text" and isinstance(content, str):
+                payload["content"] = {"text": content}
+            elif isinstance(content, str):
+                try:
+                    payload["content"] = json.loads(content)
+                except json.JSONDecodeError:
+                    raise ValueError("content must be a dict/list or valid JSON string for this msg_type")
+            else:
+                payload["content"] = content
+
+        if not any([payload["open_ids"], payload["department_ids"], payload["user_ids"], payload["union_ids"]]):
+            raise ValueError("at least one target list must be provided")
+
+        return self._post_open_api_json("/message/v4/batch_send/", payload)
+
     def upload_image(self, image_path: str) -> str:
         """
         Upload an image to Feishu.
@@ -1483,7 +2051,7 @@ class LarkBot:
         if response.success():
             chat_name = response.data.name
         else:
-            print(f"获取群聊信息失败: {response.code}, {response.msg}")
+            _print_error(f"获取群聊信息失败: {response.code}, {response.msg}")
             
         # 获取用户信息
         user_name = ""
@@ -1492,7 +2060,7 @@ class LarkBot:
         if response.success():
             user_name = response.data.user.name
         else:
-            print(f"获取用户信息失败: {response.code}, {response.msg}")
+            _print_error(f"获取用户信息失败: {response.code}, {response.msg}")
             
         return chat_name, user_name
 
@@ -1507,42 +2075,42 @@ if __name__ == '__main__':
     try:
         # 1. 获取群组列表
         group_list = bot.get_group_list()
-        print("群组列表:")
-        print(json.dumps(group_list, indent=2, ensure_ascii=False))
+        _print_info("群组列表:")
+        _print_info(json.dumps(group_list, indent=2, ensure_ascii=False))
 
         # 2. 获取特定群组的ID
         group_chat_ids = bot.get_group_chat_id_by_name("测试3")
         if not group_chat_ids:
-            print("未找到群组")
+            _print_warn("未找到群组")
             exit(1)
         group_chat_id = group_chat_ids[0]
 
         # 3. 获取群成员信息
         members = bot.get_members_in_group_by_group_chat_id(group_chat_id)
-        print("群成员:")
-        print(json.dumps(members, indent=2, ensure_ascii=False))
+        _print_info("群成员:")
+        _print_info(json.dumps(members, indent=2, ensure_ascii=False))
 
         # 4. 获取特定成员的 open_id
         member_open_ids = bot.get_member_open_id_by_name(group_chat_id, "王也")
         if not member_open_ids:
-            print("未找到指定成员")
+            _print_warn("未找到指定成员")
             exit(1)
         specific_member_user_open_id = member_open_ids[0]
 
         # 5. 获取用户信息
         user_infos = bot.get_user_info(emails=[], mobiles=["13267080069"])
-        print("用户信息:")
-        print(json.dumps(user_infos, indent=2, ensure_ascii=False))
+        _print_info("用户信息:")
+        _print_info(json.dumps(user_infos, indent=2, ensure_ascii=False))
 
         if not user_infos:
-            print("未找到用户信息")
+            _print_warn("未找到用户信息")
             exit(1)
         user_open_id = user_infos[0].get("user_id")
 
         # 6. 发送文本消息
         # 6.1 发送普通文本消息
         text_response = bot.send_text_to_user(user_open_id, "Hello, this is a single chat.\nYou know?")
-        print("发送文本消息响应:", json.dumps(text_response, indent=2, ensure_ascii=False))
+        _print_success(f"发送文本消息响应: {json.dumps(text_response, indent=2, ensure_ascii=False)}")
 
         # 6.2 发送带格式的文本消息
         some_text = TextContent.make_at_someone_pattern(specific_member_user_open_id, "hi", "open_id")
@@ -1554,40 +2122,40 @@ if __name__ == '__main__':
         some_text += TextContent.make_url_pattern("www.baidu.com", "百度")
 
         formatted_text_response = bot.send_text_to_chat(group_chat_id, f"Hi, this is a group.\n{some_text}")
-        print("发送格式化文本消息响应:", json.dumps(formatted_text_response, indent=2, ensure_ascii=False))
+        _print_success(f"发送格式化文本消息响应: {json.dumps(formatted_text_response, indent=2, ensure_ascii=False)}")
 
         # 7. 上传和发送图片
         image_path = "/Users/wayne/Downloads/IMU标定和姿态结算.drawio.png"
         image_key = bot.upload_image(image_path)
         if image_key:
             image_to_user_response = bot.send_image_to_user(user_open_id, image_key)
-            print("发送图片到用户响应:", json.dumps(image_to_user_response, indent=2, ensure_ascii=False))
+            _print_success(f"发送图片到用户响应: {json.dumps(image_to_user_response, indent=2, ensure_ascii=False)}")
 
             image_to_chat_response = bot.send_image_to_chat(group_chat_id, image_key)
-            print("发送图片到群组响应:", json.dumps(image_to_chat_response, indent=2, ensure_ascii=False))
+            _print_success(f"发送图片到群组响应: {json.dumps(image_to_chat_response, indent=2, ensure_ascii=False)}")
 
         # 8. 分享群组和用户
         share_chat_to_user_response = bot.send_shared_chat_to_user(user_open_id, group_chat_id)
-        print("分享群组到用户响应:", json.dumps(share_chat_to_user_response, indent=2, ensure_ascii=False))
+        _print_success(f"分享群组到用户响应: {json.dumps(share_chat_to_user_response, indent=2, ensure_ascii=False)}")
 
         share_chat_to_chat_response = bot.send_shared_chat_to_chat(group_chat_id, group_chat_id)
-        print("分享群组到群组响应:", json.dumps(share_chat_to_chat_response, indent=2, ensure_ascii=False))
+        _print_success(f"分享群组到群组响应: {json.dumps(share_chat_to_chat_response, indent=2, ensure_ascii=False)}")
 
         share_user_to_user_response = bot.send_shared_user_to_user(user_open_id, user_open_id)
-        print("分享用户到用户响应:", json.dumps(share_user_to_user_response, indent=2, ensure_ascii=False))
+        _print_success(f"分享用户到用户响应: {json.dumps(share_user_to_user_response, indent=2, ensure_ascii=False)}")
 
         share_user_to_chat_response = bot.send_shared_user_to_chat(group_chat_id, user_open_id)
-        print("分享用户到群组响应:", json.dumps(share_user_to_chat_response, indent=2, ensure_ascii=False))
+        _print_success(f"分享用户到群组响应: {json.dumps(share_user_to_chat_response, indent=2, ensure_ascii=False)}")
 
         # 9. 上传和发送文件
         file_path = "/Users/wayne/Downloads/test.txt"
         file_key = bot.upload_file(file_path)
         if file_key:
             file_to_user_response = bot.send_file_to_user(user_open_id, file_key)
-            print("发送文件到用户响应:", json.dumps(file_to_user_response, indent=2, ensure_ascii=False))
+            _print_success(f"发送文件到用户响应: {json.dumps(file_to_user_response, indent=2, ensure_ascii=False)}")
 
             file_to_chat_response = bot.send_file_to_chat(group_chat_id, file_key)
-            print("发送文件到群组响应:", json.dumps(file_to_chat_response, indent=2, ensure_ascii=False))
+            _print_success(f"发送文件到群组响应: {json.dumps(file_to_chat_response, indent=2, ensure_ascii=False)}")
 
         # 10. 发送富文本消息
         post = PostContent(title="我是标题")
@@ -1612,9 +2180,9 @@ if __name__ == '__main__':
 
         # 发送富文本消息
         post_response = bot.send_post_to_chat(group_chat_id, post.get_content())
-        print("发送富文本消息响应:", json.dumps(post_response, indent=2, ensure_ascii=False))
+        _print_success(f"发送富文本消息响应: {json.dumps(post_response, indent=2, ensure_ascii=False)}")
 
-        print("所有示例执行完成")
+        _print_success("所有示例执行完成")
 
     except Exception as e:
-        print(f"错误: {str(e)}")
+        _print_error(f"错误: {str(e)}")
