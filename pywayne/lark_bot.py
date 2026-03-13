@@ -12,9 +12,10 @@ import json
 import platform
 import re
 import subprocess
+import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Union
 
 import lark_oapi as lark
 import requests
@@ -23,6 +24,20 @@ from lark_oapi.api.im.v1 import *
 from pywayne.tools import wayne_print
 
 _TABLE_SEP_RE = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
+_COMMON_CARD_HEADER_TEMPLATES = (
+    "blue",
+    "wathet",
+    "turquoise",
+    "green",
+    "yellow",
+    "orange",
+    "red",
+    "carmine",
+    "violet",
+    "purple",
+    "indigo",
+    "grey",
+)
 
 
 def _print_info(text: str) -> None:
@@ -665,6 +680,17 @@ class CardContentV2:
         """
         return self.card
 
+    @staticmethod
+    def list_header_templates() -> List[str]:
+        """
+        Return commonly used Feishu card header template names.
+
+        Note:
+            This is a pragmatic helper list for common presets, not a strict
+            validation source of truth. Feishu may add new templates over time.
+        """
+        return list(_COMMON_CARD_HEADER_TEMPLATES)
+
 
 class LarkBot:
     """
@@ -698,6 +724,19 @@ class LarkBot:
         return json.dumps(content, ensure_ascii=False)
 
     @staticmethod
+    def _coerce_stream_chunk(chunk: Any) -> str:
+        """
+        Normalize streamed chunks into plain text for card rendering.
+        """
+        if chunk is None:
+            return ""
+        if isinstance(chunk, bytes):
+            return chunk.decode("utf-8", errors="ignore")
+        if isinstance(chunk, str):
+            return chunk
+        return str(chunk)
+
+    @staticmethod
     def _response_to_dict(response, action: str) -> Dict:
         """
         Convert an SDK response object to a plain dict with consistent error logging.
@@ -709,10 +748,24 @@ class LarkBot:
             )
             return {}
 
-        if response.data is None:
+        response_data_obj = getattr(response, "data", None)
+        if response_data_obj is None:
+            raw = getattr(getattr(response, "raw", None), "content", b"")
+            if raw:
+                try:
+                    if isinstance(raw, bytes):
+                        raw = raw.decode("utf-8")
+                    raw_json = json.loads(raw)
+                    data = raw_json.get("data")
+                    if data is None:
+                        return raw_json if isinstance(raw_json, dict) else {}
+                    lark.logger.info(data)
+                    return data
+                except Exception:
+                    pass
             return {}
 
-        response_data = json.loads(lark.JSON.marshal(response.data, indent=4))
+        response_data = json.loads(lark.JSON.marshal(response_data_obj, indent=4))
         lark.logger.info(response_data)
         return response_data
 
@@ -1307,6 +1360,266 @@ class LarkBot:
             responses.append(self.send_post_to_chat(chat_id, post.get_content()))
 
         return responses
+
+    def build_streaming_card(self,
+                             md_text: str,
+                             *,
+                             title: str = "",
+                             template: str = "blue",
+                             streaming: bool = True,
+                             status_text: str = "",
+                             max_chunk_bytes: int = 18_000) -> Dict[str, Any]:
+        """
+        Build a schema=2.0 card suitable for progressive in-place updates.
+
+        Notes:
+            - The generated card keeps `config.update_multi=true`, which is required
+              when updating a shared message card for all viewers.
+            - Feishu card updates are rate-limited; callers should throttle update
+              frequency on their side.
+        """
+        card = CardContentV2(title=title, template=template)
+        body = md_text or ""
+
+        if streaming:
+            footer = status_text or "Generating..."
+            body = f"{body}\n\n---\n\n{footer}" if body else footer
+        elif status_text:
+            body = f"{body}\n\n---\n\n{status_text}" if body else status_text
+
+        if not body:
+            body = "..."
+
+        card.add_markdown(body, max_chunk_bytes=max_chunk_bytes)
+        return card.get_card()
+
+    def reply_streaming_card(self,
+                             message_id: str,
+                             *,
+                             title: str = "Streaming Reply",
+                             template: str = "blue",
+                             initial_md: str = "",
+                             reply_in_thread: bool = False,
+                             uuid: str = "",
+                             status_text: str = "Generating...",
+                             max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Reply with an initial interactive card intended for subsequent stream updates.
+        """
+        card = self.build_streaming_card(
+            initial_md,
+            title=title,
+            template=template,
+            streaming=True,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        return self.reply_message(
+            message_id,
+            "interactive",
+            card,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+        )
+
+    def update_streaming_card(self,
+                              message_id: str,
+                              md_text: str,
+                              *,
+                              title: str = "Streaming Reply",
+                              template: str = "blue",
+                              done: bool = False,
+                              status_text: str = "",
+                              max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Update a previously sent streaming card with the latest full markdown text.
+
+        Args:
+            message_id: Interactive card message ID to update.
+            md_text: The full current markdown text, not a delta chunk.
+            done: Whether streaming has finished.
+            status_text: Optional footer line. Defaults to `Generating...` while
+                         streaming and no footer when `done=True`.
+        """
+        card = self.build_streaming_card(
+            md_text,
+            title=title,
+            template=template,
+            streaming=not done,
+            status_text=status_text if done else (status_text or "Generating..."),
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        return self.update_interactive_card(message_id, card)
+
+    def recolor_streaming_card(self,
+                               message_id: str,
+                               md_text: str,
+                               *,
+                               title: str = "Streaming Reply",
+                               template: str = "green",
+                               status_text: str = "Done",
+                               done: bool = True,
+                               max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Convenience helper to switch a streaming card to another header template.
+
+        Typical usage:
+            - blue while generating
+            - green when done
+            - red when failed
+            - orange when partially complete
+        """
+        return self.update_streaming_card(
+            message_id,
+            md_text,
+            title=title,
+            template=template,
+            done=done,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+
+    def stream_reply_card(self,
+                          source_message_id: str,
+                          text_stream: Iterable[Any],
+                          *,
+                          title: str = "Streaming Reply",
+                          template: str = "blue",
+                          initial_md: str = "",
+                          reply_in_thread: bool = False,
+                          uuid: str = "",
+                          update_interval: float = 0.25,
+                          status_text: str = "Generating...",
+                          final_status_text: str = "",
+                          final_template: Optional[str] = "green",
+                          max_chunk_bytes: int = 18_000) -> Dict[str, Any]:
+        """
+        Consume a sync text stream and keep one reply card updated in-place.
+        """
+        reply = self.reply_streaming_card(
+            source_message_id,
+            title=title,
+            template=template,
+            initial_md=initial_md,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        card_message_id = reply.get("message_id", "")
+        if not card_message_id:
+            return {"reply": reply, "final": {}, "message_id": "", "text": initial_md}
+
+        full_text = initial_md
+        last_update = 0.0
+
+        for chunk in text_stream:
+            chunk_text = self._coerce_stream_chunk(chunk)
+            if not chunk_text:
+                continue
+            full_text += chunk_text
+
+            now = time.monotonic()
+            if now - last_update < update_interval:
+                continue
+
+            self.update_streaming_card(
+                card_message_id,
+                full_text,
+                title=title,
+                template=template,
+                done=False,
+                status_text=status_text,
+                max_chunk_bytes=max_chunk_bytes,
+            )
+            last_update = now
+
+        final = self.update_streaming_card(
+            card_message_id,
+            full_text,
+            title=title,
+            template=final_template or template,
+            done=True,
+            status_text=final_status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        return {
+            "reply": reply,
+            "final": final,
+            "message_id": card_message_id,
+            "text": full_text,
+        }
+
+    async def astream_reply_card(self,
+                                 source_message_id: str,
+                                 text_stream: AsyncIterable[Any],
+                                 *,
+                                 title: str = "Streaming Reply",
+                                 template: str = "blue",
+                                 initial_md: str = "",
+                                 reply_in_thread: bool = False,
+                                 uuid: str = "",
+                                 update_interval: float = 0.25,
+                                 status_text: str = "Generating...",
+                                 final_status_text: str = "",
+                                 final_template: Optional[str] = "green",
+                                 max_chunk_bytes: int = 18_000) -> Dict[str, Any]:
+        """
+        Async variant of `stream_reply_card` for async generators.
+        """
+        reply = self.reply_streaming_card(
+            source_message_id,
+            title=title,
+            template=template,
+            initial_md=initial_md,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        card_message_id = reply.get("message_id", "")
+        if not card_message_id:
+            return {"reply": reply, "final": {}, "message_id": "", "text": initial_md}
+
+        full_text = initial_md
+        last_update = 0.0
+
+        async for chunk in text_stream:
+            chunk_text = self._coerce_stream_chunk(chunk)
+            if not chunk_text:
+                continue
+            full_text += chunk_text
+
+            now = time.monotonic()
+            if now - last_update < update_interval:
+                continue
+
+            self.update_streaming_card(
+                card_message_id,
+                full_text,
+                title=title,
+                template=template,
+                done=False,
+                status_text=status_text,
+                max_chunk_bytes=max_chunk_bytes,
+            )
+            last_update = now
+
+        final = self.update_streaming_card(
+            card_message_id,
+            full_text,
+            title=title,
+            template=final_template or template,
+            done=True,
+            status_text=final_status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+        return {
+            "reply": reply,
+            "final": final,
+            "message_id": card_message_id,
+            "text": full_text,
+        }
 
     def reply_message(self,
                       message_id: str,

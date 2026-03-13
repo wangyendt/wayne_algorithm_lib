@@ -72,6 +72,58 @@
   - 获取群名和用户名
 
 
+重点能力
+--------
+
+如果你想快速抓住这个模块最核心的扩展能力，优先关注这几组：
+
+- 消息生命周期补齐
+
+  - ``reply_message``
+  - ``forward_message``
+  - ``recall_message``
+  - ``get_message``
+  - ``get_message_list``
+  - ``update_message``
+  - ``patch_message``
+  - ``update_interactive_card``
+
+- 消息状态操作
+
+  - ``get_message_read_users``
+  - ``urgent_message``
+  - ``add_reaction`` / ``delete_reaction`` / ``list_reactions``
+  - ``pin_message`` / ``unpin_message`` / ``list_pinned_messages``
+
+- 流式卡片回复
+
+  - ``reply_streaming_card``
+  - ``update_streaming_card``
+  - ``recolor_streaming_card``
+  - ``stream_reply_card``
+  - ``astream_reply_card``
+
+- 群管理增强
+
+  - ``create_chat`` / ``update_chat`` / ``delete_chat``
+  - ``add_members_to_chat`` / ``remove_members_from_chat``
+  - ``set_chat_admin`` / ``transfer_chat_owner``
+  - ``get_chat_announcement`` / ``set_chat_announcement``
+
+- 批量发消息
+
+  - ``batch_send_message`` 支持按用户 / 部门触达
+
+如果你在做机器人业务闭环，最常见的组合一般是：
+
+- 收到用户消息 -> ``reply_message`` 引用回复
+- 长任务开始 -> ``reply_streaming_card`` -> 多次 ``update_streaming_card`` -> 完成后 ``recolor_streaming_card(..., template="green")``
+- 告警消息 -> ``forward_message`` 给值班人 -> ``urgent_message`` 加急
+- 重要结论 -> ``reply_message`` -> ``pin_message``
+- 任务处理中 -> ``add_reaction`` -> 完成 / 失败后 ``delete_reaction``
+- 项目群初始化 -> ``create_chat`` -> ``add_members_to_chat`` -> ``set_chat_admin`` -> ``send_interactive_to_chat``
+
+
 快速开始
 --------
 
@@ -200,6 +252,7 @@ CardContentV2
 - ``add_hr``
 - ``add_image``
 - ``get_card``
+- ``list_header_templates``
 
 示例：日报卡片
 
@@ -213,6 +266,14 @@ CardContentV2
    card.add_image("img_xxx")
 
    bot.send_interactive_to_chat("oc_xxx", card.get_card())
+
+示例：查看常用卡片头部模板色
+
+.. code-block:: python
+
+   from pywayne.tools import wayne_print
+
+   wayne_print(CardContentV2.list_header_templates(), color="cyan")
 
 
 LarkBot 类
@@ -412,6 +473,25 @@ interactive 卡片
    card.add_markdown("已收到你的请求，正在执行。")
    bot.reply_message("om_xxx", "interactive", card.get_card())
 
+示例：按消息类型动态引用回复
+
+.. code-block:: python
+
+   def reply_by_type(message_id: str, kind: str):
+       mapping = {
+           "text": "收到文本",
+           "image": "收到图片",
+           "file": "收到文件",
+           "audio": "收到音频",
+           "post": "收到 post",
+           "interactive": "收到 card",
+       }
+       bot.reply_message(
+           message_id,
+           "text",
+           {"text": mapping.get(kind, f"收到 {kind}")}
+       )
+
 
 转发消息
 ~~~~~~~~
@@ -428,6 +508,13 @@ interactive 卡片
        receive_id_type="open_id"
    )
 
+示例：先引用回复，再把原始消息转发给二线支持
+
+.. code-block:: python
+
+   bot.reply_message("om_xxx", "text", {"text": "已转交二线支持"})
+   bot.forward_message("om_xxx", "ou_level2_xxx", receive_id_type="open_id")
+
 
 撤回消息
 ~~~~~~~~
@@ -435,6 +522,13 @@ interactive 卡片
 .. py:method:: recall_message(message_id: str)
 
 适合“发错消息立即撤回”或“临时状态消息在成功后撤回”。
+
+示例：短暂提示后立即撤回
+
+.. code-block:: python
+
+   sent = bot.send_text_to_chat("oc_xxx", "这是一条临时提示")
+   bot.recall_message(sent["message_id"])
 
 
 查询消息
@@ -453,6 +547,15 @@ interactive 卡片
        end_time="1735689600000",
        sort_type="ByCreateTimeAsc"
    )
+
+示例：先查单条消息，再决定是否转发
+
+.. code-block:: python
+
+   detail = bot.get_message("om_xxx")
+   content = detail["body"]["content"]
+   if "紧急" in content:
+       bot.forward_message("om_xxx", "ou_duty_xxx", receive_id_type="open_id")
 
 
 更新消息
@@ -475,6 +578,16 @@ interactive 卡片
                "template_variable": {"status": "已完成"}
            }
        }
+   )
+
+示例：先发文本，再 patch 成补充说明
+
+.. code-block:: python
+
+   sent = bot.send_text_to_chat("oc_xxx", "初版结论")
+   bot.patch_message(
+       sent["message_id"],
+       {"content": {"text": "初版结论\n补充说明：影响范围仅限灰度环境"}}
    )
 
 
@@ -500,6 +613,14 @@ interactive 卡片
        urgent_type="app",
        user_open_ids=["ou_duty_xxx"]
    )
+
+示例：查询哪些人已读，再决定是否继续催办
+
+.. code-block:: python
+
+   readers = bot.get_message_read_users("om_xxx")
+   if not readers.get("items"):
+       bot.urgent_message("om_xxx", "sms", ["ou_duty_xxx"])
 
 
 reaction
@@ -537,6 +658,19 @@ reaction
    data = bot.list_reactions("om_xxx")
    wayne_print(data, color="cyan")
 
+示例：把 reaction 当作任务状态灯
+
+.. code-block:: python
+
+   reaction = bot.add_reaction("om_xxx", "WITTY")
+   try:
+       bot.reply_message("om_xxx", "text", {"text": "处理中"})
+   except Exception:
+       bot.add_reaction("om_xxx", "HAHA")
+       raise
+   finally:
+       bot.delete_reaction("om_xxx", reaction["reaction_id"])
+
 
 置顶
 ~~~~
@@ -551,6 +685,198 @@ reaction
 
    reply = bot.reply_message("om_xxx", "text", {"text": "这是最终结论"})
    bot.pin_message(reply["message_id"])
+
+示例：查询置顶消息并输出摘要
+
+.. code-block:: python
+
+   from pywayne.tools import wayne_print
+
+   pinned = bot.list_pinned_messages("oc_xxx")
+   for item in pinned.get("items", []):
+       wayne_print(item["message_id"], color="cyan")
+
+
+流式卡片回复
+~~~~~~~~~~~~
+
+这一组方法用于“先回复一张卡片，再不断原位刷新同一张卡片内容”，适合接 LLM 流式输出。
+
+- ``build_streaming_card(md_text, ...)``
+- ``reply_streaming_card(message_id, ...)``
+- ``update_streaming_card(message_id, md_text, ...)``
+- ``recolor_streaming_card(message_id, md_text, ...)``
+- ``stream_reply_card(source_message_id, text_stream, ...)``
+- ``astream_reply_card(source_message_id, text_stream, ...)``
+
+设计约束：
+
+- 走的是“先发 interactive 卡片，再反复更新该消息”的路径
+- 更新时传入的是“当前完整文本”，不是 delta
+- 默认 ``update_interval=0.25``，是为了尽量避开单消息高频更新限制
+- 卡片默认带 ``config.update_multi=true``
+- 颜色不是任意 RGB，而是飞书卡片头部的预设模板色
+- ``final_template`` 用于流式结束后的最终颜色
+- ``recolor_streaming_card`` 适合手动切换为成功 / 失败 / 警告状态色
+
+常用头部模板色：
+
+- ``blue``
+- ``wathet``
+- ``turquoise``
+- ``green``
+- ``yellow``
+- ``orange``
+- ``red``
+- ``carmine``
+- ``violet``
+- ``purple``
+- ``indigo``
+- ``grey``
+
+你也可以直接调用 ``CardContentV2.list_header_templates()`` 获取当前内置常用列表。
+
+示例 1：手工启动 + 手工更新
+
+.. code-block:: python
+
+   reply = bot.reply_streaming_card(
+       "om_xxx",
+       title="AI 回复中",
+       initial_md="正在思考..."
+   )
+
+   card_message_id = reply["message_id"]
+   bot.update_streaming_card(card_message_id, "第一段输出", title="AI 回复中")
+   bot.update_streaming_card(card_message_id, "完整输出内容", title="AI 回复完成", done=True)
+
+示例 2：完成后自动从蓝色切到绿色
+
+.. code-block:: python
+
+   def fake_stream():
+       yield "第一段输出\\n"
+       yield "第二段输出\\n"
+       yield "第三段输出\\n"
+
+   result = bot.stream_reply_card(
+       "om_xxx",
+       fake_stream(),
+       title="AI 回复中",
+       template="blue",
+       final_template="green",
+       status_text="生成中...",
+       final_status_text="已完成"
+   )
+
+示例 3：失败时改成红色
+
+.. code-block:: python
+
+   reply = bot.reply_streaming_card(
+       "om_xxx",
+       title="任务执行中",
+       template="blue",
+       initial_md="开始执行..."
+   )
+
+   card_message_id = reply["message_id"]
+
+   try:
+       bot.update_streaming_card(card_message_id, "步骤 1 成功\\n步骤 2 成功", title="任务执行中")
+       raise RuntimeError("第三步失败")
+   except Exception as exc:
+       bot.recolor_streaming_card(
+           card_message_id,
+           f"步骤 1 成功\\n步骤 2 成功\\n\\n错误信息：{exc}",
+           title="任务执行失败",
+           template="red",
+           status_text="执行失败",
+           done=True
+       )
+
+示例 4：逐字更新，完成后自动变绿色
+
+.. code-block:: python
+
+   import time
+
+   def char_stream():
+       sentence = "这是一个逐字流式卡片回复示例。"
+       for ch in sentence:
+           yield ch
+           time.sleep(0.3)
+
+   bot.stream_reply_card(
+       "om_xxx",
+       char_stream(),
+       title="逐字输出中",
+       template="blue",
+       final_template="green",
+       status_text="生成中...",
+       final_status_text="已完成",
+       update_interval=0.25
+   )
+
+示例 5：处理中为蓝色，待人工确认切橙色，最终完成切绿色
+
+.. code-block:: python
+
+   reply = bot.reply_streaming_card(
+       "om_xxx",
+       title="审批任务",
+       template="blue",
+       initial_md="系统已开始自动分析"
+   )
+
+   card_message_id = reply["message_id"]
+   bot.update_streaming_card(
+       card_message_id,
+       "自动分析完成，等待人工确认",
+       title="审批任务",
+       template="orange",
+       done=False,
+       status_text="等待人工确认"
+   )
+   bot.recolor_streaming_card(
+       card_message_id,
+       "自动分析完成\n人工确认通过",
+       title="审批任务",
+       template="green",
+       status_text="已完成"
+   )
+
+示例 6：直接消费同步生成器
+
+.. code-block:: python
+
+   def fake_stream():
+       yield "你好，"
+       yield "这是"
+       yield "一段流式输出。"
+
+   result = bot.stream_reply_card(
+       "om_xxx",
+       fake_stream(),
+       title="AI 回复中"
+   )
+
+示例 7：异步生成器版本
+
+.. code-block:: python
+
+   async def fake_astream():
+       yield "第一段"
+       yield "第二段"
+
+   result = await bot.astream_reply_card(
+       "om_xxx",
+       fake_astream(),
+       title="AI 回复中",
+       template="wathet",
+       final_template="green",
+       final_status_text="回答完成"
+   )
 
 
 群管理
@@ -585,6 +911,16 @@ reaction
        description="用于灰度发布值守"
    )
 
+示例：转让群主后再更新群描述
+
+.. code-block:: python
+
+   bot.transfer_chat_owner("oc_xxx", "ou_new_owner")
+   bot.update_chat(
+       chat_id="oc_xxx",
+       description="群主已更新，请按新流程协作"
+   )
+
 
 成员管理
 ~~~~~~~~
@@ -606,6 +942,14 @@ reaction
 
    bot.set_chat_admin("oc_xxx", ["ou_dev1"], is_admin=False)
 
+示例：拉人、踢人、再补发说明
+
+.. code-block:: python
+
+   bot.add_members_to_chat("oc_xxx", ["ou_new1", "ou_new2"])
+   bot.remove_members_from_chat("oc_xxx", ["ou_old1"])
+   bot.send_text_to_chat("oc_xxx", "成员已调整，请关注新的值班安排")
+
 
 群公告
 ~~~~~~
@@ -620,6 +964,21 @@ reaction
 .. code-block:: python
 
    announcement = bot.get_chat_announcement("oc_xxx")
+
+示例：用 patch 语义更新公告
+
+.. code-block:: python
+
+   bot.set_chat_announcement(
+       "oc_xxx",
+       requests=[
+           {
+               "op": "replace",
+               "path": "/content",
+               "value": "今晚 23:00 维护，请提前保存工作内容。"
+           }
+       ]
+   )
 
 
 资源与下载
@@ -657,6 +1016,16 @@ reaction
 
 适合“你已经拿到消息正文 JSON，想把里面所有 file_key/image_key 对应的资源一次性落盘”。
 
+示例：下载一条消息中的全部资源后统一归档
+
+.. code-block:: python
+
+   import json
+
+   detail = bot.get_message("om_xxx")
+   content = json.loads(detail["body"]["content"])
+   bot.download_message_resources("om_xxx", content, "/tmp/msg_assets")
+
 
 用户与群信息
 ------------
@@ -675,6 +1044,12 @@ reaction
    chat_ids = bot.get_group_chat_id_by_name("项目 Alpha")
    if chat_ids:
        open_ids = bot.get_member_open_id_by_name(chat_ids[0], "Wayne")
+
+示例：同时查群名和发件人姓名
+
+.. code-block:: python
+
+   group_name, user_name = bot.get_chat_and_user_name("oc_xxx", "ou_xxx")
 
 
 批量发送
@@ -713,6 +1088,22 @@ reaction
        },
        department_ids=["od_xxx"]
    )
+
+示例：批量发通知后轮询进度
+
+.. code-block:: python
+
+   from pywayne.tools import wayne_print
+
+   result = bot.batch_send_message(
+       "text",
+       content="请在今晚 18:00 前完成确认",
+       user_open_ids=["ou_a", "ou_b"]
+   )
+   task_id = result.get("task_id")
+   if task_id:
+       progress = bot.get_batch_message_progress(task_id)
+       wayne_print(progress, color="cyan")
 
 
 组合场景示例
@@ -782,6 +1173,72 @@ reaction
        bot.delete_reaction("om_xxx", reaction["reaction_id"])
 
 
+场景 5.1：把 LLM 流式输出刷到同一张回复卡片上
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   def llm_stream():
+       yield "今天的分析如下：\n\n"
+       yield "1. 指标整体稳定\n"
+       yield "2. 风险点主要在支付链路\n"
+       yield "3. 建议先观察 30 分钟\n"
+
+   bot.stream_reply_card(
+       "om_xxx",
+       llm_stream(),
+       title="分析结果生成中",
+       final_status_text="已完成"
+   )
+
+
+场景 5.2：逐字流式输出，完成态改绿色，失败态改红色
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   import time
+
+   reply = bot.reply_streaming_card(
+       "om_xxx",
+       title="逐字输出测试",
+       template="blue",
+       initial_md=""
+   )
+
+   card_message_id = reply["message_id"]
+   text = "这是一段逐字输出的测试文本。"
+   current = ""
+
+   try:
+       for ch in text:
+           current += ch
+           bot.update_streaming_card(
+               card_message_id,
+               current,
+               title="逐字输出测试",
+               template="blue",
+               status_text="生成中..."
+           )
+           time.sleep(0.3)
+
+       bot.recolor_streaming_card(
+           card_message_id,
+           current,
+           title="逐字输出测试",
+           template="green",
+           status_text="已完成"
+       )
+   except Exception as exc:
+       bot.recolor_streaming_card(
+           card_message_id,
+           current + f"\n\n错误信息：{exc}",
+           title="逐字输出测试",
+           template="red",
+           status_text="失败"
+       )
+
+
 场景 6：创建专项群，拉人，设管理员，发欢迎卡片
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -828,6 +1285,20 @@ reaction
        bot.send_text_to_user(open_ids[0], "请确认值班")
 
 
+场景 8.1：先按群名查群，再发送长 Markdown 卡片
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   chat_ids = bot.get_group_chat_id_by_name("测试3")
+   if chat_ids:
+       bot.send_markdown_to_chat(
+           chat_ids[0],
+           md_text="# 自动通知\n\n- 功能已发布\n- 请在群内验证",
+           title="系统通知"
+       )
+
+
 场景 9：下载消息附件后再二次转发
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -849,6 +1320,19 @@ reaction
    bot.send_interactive_to_chat("oc_xxx", card.get_card())
 
 
+场景 11：查消息详情 -> 转发 -> 加急 -> 置顶结论
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   detail = bot.get_message("om_alert_xxx")
+   if "严重" in detail["body"]["content"]:
+       bot.forward_message("om_alert_xxx", "ou_duty_xxx", receive_id_type="open_id")
+       bot.urgent_message("om_alert_xxx", "app", ["ou_duty_xxx"])
+       reply = bot.reply_message("om_alert_xxx", "text", {"text": "已转交值班并加急"})
+       bot.pin_message(reply["message_id"])
+
+
 注意事项
 --------
 
@@ -857,3 +1341,5 @@ reaction
 3. ``reaction`` 的 ``emoji_type`` 不是表情符号本身，而是飞书定义的名称。
 4. ``batch_send_message`` 面向用户 / 部门，不面向群；它和群消息的生命周期不同。
 5. ``set_chat_announcement`` 目前直接暴露飞书 patch 风格参数，适合需要精确控制公告 patch 的场景。
+6. 流式卡片更新传入的是“当前完整文本”，不是本次新增片段；如果你只传 delta，卡片内容会丢前文。
+7. 卡片颜色使用的是飞书头部模板色，不是任意 RGB；完成自动变绿需要显式传 ``final_template="green"`` 或手动 ``recolor_streaming_card``。

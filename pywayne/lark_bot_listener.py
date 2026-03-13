@@ -16,7 +16,7 @@ import asyncio
 import cv2
 import tempfile
 from pathlib import Path
-from typing import Optional, Callable, Dict, Set, List, Any
+from typing import Optional, Callable, Dict, Set, List, Any, Iterable, AsyncIterable, Union
 from dataclasses import dataclass
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
@@ -124,6 +124,13 @@ class LarkBotListener:
         except Exception:
             return {}
 
+    @staticmethod
+    def _resolve_source_message_id(target: Union[str, MessageContext]) -> str:
+        """Accept either a raw message_id or a MessageContext."""
+        if isinstance(target, MessageContext):
+            return target.message_id
+        return target
+
     async def _invoke_handler(self, func: Callable, **kwargs) -> Any:
         """Support both async and sync handler functions."""
         result = func(**kwargs)
@@ -181,6 +188,158 @@ class LarkBotListener:
             _print_success(f"消息发送成功: {content}")
         except Exception as e:
             _print_error(f"发送消息时发生错误: {e}")
+
+    def reply_streaming_card(self,
+                             target: Union[str, MessageContext],
+                             *,
+                             title: str = "Streaming Reply",
+                             template: str = "blue",
+                             initial_md: str = "",
+                             reply_in_thread: bool = False,
+                             uuid: str = "",
+                             status_text: str = "Generating...",
+                             max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Reply to a source message with an initial streaming card.
+
+        Args:
+            target: Source message_id or MessageContext.
+        """
+        return self.bot.reply_streaming_card(
+            self._resolve_source_message_id(target),
+            title=title,
+            template=template,
+            initial_md=initial_md,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+
+    def update_streaming_card(self,
+                              card_message_id: str,
+                              md_text: str,
+                              *,
+                              title: str = "Streaming Reply",
+                              template: str = "blue",
+                              done: bool = False,
+                              status_text: str = "",
+                              max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Update an existing streaming reply card.
+
+        Note:
+            `card_message_id` must be the message ID returned by
+            `reply_streaming_card(...)`, not the original user message ID.
+        """
+        return self.bot.update_streaming_card(
+            card_message_id,
+            md_text,
+            title=title,
+            template=template,
+            done=done,
+            status_text=status_text,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+
+    def recolor_streaming_card(self,
+                               card_message_id: str,
+                               md_text: str,
+                               *,
+                               title: str = "Streaming Reply",
+                               template: str = "green",
+                               status_text: str = "Done",
+                               done: bool = True,
+                               max_chunk_bytes: int = 18_000) -> Dict:
+        """
+        Switch an existing streaming card to another Feishu header template.
+
+        Typical usage:
+            - green after success
+            - red after failure
+            - orange while waiting for manual review
+        """
+        return self.bot.recolor_streaming_card(
+            card_message_id,
+            md_text,
+            title=title,
+            template=template,
+            status_text=status_text,
+            done=done,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+
+    def stream_reply_card(self,
+                          target: Union[str, MessageContext],
+                          text_stream: Iterable[Any],
+                          *,
+                          title: str = "Streaming Reply",
+                          template: str = "blue",
+                          initial_md: str = "",
+                          reply_in_thread: bool = False,
+                          uuid: str = "",
+                          update_interval: float = 0.25,
+                          status_text: str = "Generating...",
+                          final_status_text: str = "",
+                          final_template: Optional[str] = "green",
+                          max_chunk_bytes: int = 18_000) -> Dict[str, Any]:
+        """
+        Listener-level wrapper around `LarkBot.stream_reply_card`.
+
+        Args:
+            target: Source message_id or MessageContext.
+            text_stream: Sync iterable that yields text chunks.
+        """
+        return self.bot.stream_reply_card(
+            self._resolve_source_message_id(target),
+            text_stream,
+            title=title,
+            template=template,
+            initial_md=initial_md,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+            update_interval=update_interval,
+            status_text=status_text,
+            final_status_text=final_status_text,
+            final_template=final_template,
+            max_chunk_bytes=max_chunk_bytes,
+        )
+
+    async def astream_reply_card(self,
+                                 target: Union[str, MessageContext],
+                                 text_stream: AsyncIterable[Any],
+                                 *,
+                                 title: str = "Streaming Reply",
+                                 template: str = "blue",
+                                 initial_md: str = "",
+                                 reply_in_thread: bool = False,
+                                 uuid: str = "",
+                                 update_interval: float = 0.25,
+                                 status_text: str = "Generating...",
+                                 final_status_text: str = "",
+                                 final_template: Optional[str] = "green",
+                                 max_chunk_bytes: int = 18_000) -> Dict[str, Any]:
+        """
+        Async listener-level wrapper around `LarkBot.astream_reply_card`.
+
+        Args:
+            target: Source message_id or MessageContext.
+            text_stream: Async iterable that yields text chunks.
+        """
+        return await self.bot.astream_reply_card(
+            self._resolve_source_message_id(target),
+            text_stream,
+            title=title,
+            template=template,
+            initial_md=initial_md,
+            reply_in_thread=reply_in_thread,
+            uuid=uuid,
+            update_interval=update_interval,
+            status_text=status_text,
+            final_status_text=final_status_text,
+            final_template=final_template,
+            max_chunk_bytes=max_chunk_bytes,
+        )
 
     def listen(self, message_type: Optional[str] = None,
                group_only: bool = False,
