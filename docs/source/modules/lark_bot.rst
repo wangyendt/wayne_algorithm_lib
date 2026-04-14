@@ -6,7 +6,7 @@
 如果把整个模块按对象分层，可以理解为：
 
 - ``TextContent``: 文本格式工具，解决 @、加粗、链接等轻量文本拼接
-- ``PostContent``: post 富文本构造器，适合做结构化文本、代码块、Markdown 表格降级
+- ``PostContent``: rich_text 富文本构造器，适合做结构化文本、代码块、Markdown 表格降级
 - ``CardContentV2``: schema 2.0 卡片构造器，适合大段 Markdown 和轻交互展示
 - ``LarkBot``: 统一 API 封装，负责真正和飞书 OpenAPI 通信
 
@@ -23,8 +23,8 @@
   - 音频
   - 媒体
   - 文件
-  - post 富文本
-  - interactive 卡片
+  - rich_text 富文本
+  - card 卡片
   - 分享群聊
   - 分享用户
   - 系统消息
@@ -38,9 +38,8 @@
   - 撤回消息
   - 获取单条消息
   - 获取历史消息列表
-  - 全量更新消息
-  - patch 消息
-  - 原位更新 interactive 卡片
+  - 编辑文本 / rich_text / card 消息
+  - 原位更新 card 卡片
   - 查询已读用户
   - 加急消息
   - 加 / 删 / 查 reaction
@@ -84,9 +83,9 @@
   - ``recall_message``
   - ``get_message``
   - ``get_message_list``
-  - ``update_message``
-  - ``patch_message``
-  - ``update_interactive_card``
+  - ``edit_text_message``
+  - ``edit_post_message``
+  - ``edit_card_message``
 
 - 消息状态操作
 
@@ -121,7 +120,7 @@
 - 告警消息 -> ``forward_message`` 给值班人 -> ``urgent_message`` 加急
 - 重要结论 -> ``reply_message`` -> ``pin_message``
 - 任务处理中 -> ``add_reaction`` -> 完成 / 失败后 ``delete_reaction``
-- 项目群初始化 -> ``create_chat`` -> ``add_members_to_chat`` -> ``set_chat_admin`` -> ``send_interactive_to_chat``
+- 项目群初始化 -> ``create_chat`` -> ``add_members_to_chat`` -> ``set_chat_admin`` -> ``send_card_to_chat``
 
 
 快速开始
@@ -173,7 +172,7 @@ TextContent
 PostContent
 -----------
 
-``PostContent`` 适合构造复杂 post 富文本，尤其适合：
+``PostContent`` 适合构造复杂 rich_text 富文本，尤其适合：
 
 - 多段结构化说明
 - 一行混排文字 / 链接 / @ / 图片
@@ -199,7 +198,7 @@ PostContent
 - ``add_contents_in_new_line``
 - ``list_emoji_types``
 
-示例：混排 post 消息
+示例：混排 rich_text 消息
 
 .. code-block:: python
 
@@ -220,7 +219,7 @@ PostContent
        post.make_code_block_content("bash", "deploy.sh --env prod")
    )
 
-   bot.send_post_to_chat("oc_xxx", post.get_content())
+   bot.send_rich_text_to_chat("oc_xxx", post.get_content())
 
 示例：Markdown 表格安全降级
 
@@ -238,13 +237,13 @@ PostContent
 
    post = PostContent(title="测试日报")
    post.add_markdown(md, table_as="code_block", max_chunk_bytes=8000)
-   bot.send_post_to_chat("oc_xxx", post.get_content())
+   bot.send_rich_text_to_chat("oc_xxx", post.get_content())
 
 
 CardContentV2
 -------------
 
-``CardContentV2`` 是面向 schema 2.0 interactive 卡片的轻量构造器，适合大段 Markdown 公告、日报、状态展示。
+``CardContentV2`` 是面向 schema 2.0 card 卡片的轻量构造器，适合大段 Markdown 公告、日报、状态展示。
 
 常用方法：
 
@@ -265,7 +264,7 @@ CardContentV2
    card.add_hr()
    card.add_image("img_xxx")
 
-   bot.send_interactive_to_chat("oc_xxx", card.get_card())
+   bot.send_card_to_chat("oc_xxx", card.get_card())
 
 示例：查看常用卡片头部模板色
 
@@ -334,28 +333,28 @@ LarkBot 类
    bot.send_file_to_chat("oc_xxx", pdf_key)
 
 
-post 富文本
-~~~~~~~~~~~
+rich_text 富文本
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- ``send_post_to_user``
-- ``send_post_to_chat``
+- ``send_rich_text_to_user``
+- ``send_rich_text_to_chat``
 
 .. code-block:: python
 
    post = PostContent(title="值班提醒")
    post.add_content_in_new_line(post.make_text_content("今晚 20:00 发布", styles=["bold"]))
-   bot.send_post_to_chat("oc_xxx", post.get_content())
+   bot.send_rich_text_to_chat("oc_xxx", post.get_content())
 
 
-interactive 卡片
+card 卡片
 ~~~~~~~~~~~~~~~~
 
-- ``send_interactive_to_user``
-- ``send_interactive_to_chat``
+- ``send_card_to_user``
+- ``send_card_to_chat``
 
 .. code-block:: python
 
-   bot.send_interactive_to_chat(
+   bot.send_card_to_chat(
        "oc_xxx",
        {
            "header": {"title": {"content": "状态卡片", "tag": "plain_text"}},
@@ -367,46 +366,46 @@ interactive 卡片
 分享消息
 ~~~~~~~~
 
-- ``send_shared_chat_to_user`` / ``send_shared_chat_to_chat``
-- ``send_shared_user_to_user`` / ``send_shared_user_to_chat``
+- ``share_chat_to_user`` / ``share_chat_to_chat``
+- ``share_user_to_user`` / ``share_user_to_chat``
 
 
 系统消息
 ~~~~~~~~
 
-- ``send_system_msg_to_user``
+- ``send_system_message_to_user``
 
 适合做系统通知类场景，不走普通文本样式。
 
 
-推荐入口：send_markdown_to_chat
---------------------------------
+推荐入口：send_markdown_message_to_chat
+----------------------------------------
 
-.. py:method:: send_markdown_to_chat(chat_id: str, md_text: str, *, title: str = "", prefer: str = "card_v2", table_fallback: str = "code_block", max_message_bytes: Optional[int] = None)
+.. py:method:: send_markdown_message_to_chat(chat_id: str, md_text: str, *, title: str = "", prefer: str = "card_v2", table_fallback: str = "code_block", max_message_bytes: Optional[int] = None)
 
 这是推荐的高层发送入口，适合绝大多数“我要发 Markdown”场景。
 
 特性：
 
 - 自动按字节分包
-- 支持 ``card_v2`` 与 ``post`` 两条路由
+- 支持 ``card_v2`` 与 ``post`` 两条发送路由
 - ``post`` 路由下支持表格降级
 
 示例 1：默认发 schema 2.0 卡片
 
 .. code-block:: python
 
-   bot.send_markdown_to_chat(
+   bot.send_markdown_message_to_chat(
        "oc_xxx",
        md_text="# 发布完成\n\n- API: pass\n- Worker: pass",
        title="发布结果"
    )
 
-示例 2：强制走 post，并处理 Markdown 表格
+示例 2：强制走 rich_text 路由，并处理 Markdown 表格
 
 .. code-block:: python
 
-   bot.send_markdown_to_chat(
+   bot.send_markdown_message_to_chat(
        "oc_xxx",
        md_text="""
        # 回归看板
@@ -425,7 +424,7 @@ interactive 卡片
 
 .. code-block:: python
 
-   bot.send_markdown_to_chat(
+   bot.send_markdown_message_to_chat(
        "oc_xxx",
        md_text=very_long_markdown,
        title="长文日报",
@@ -483,7 +482,7 @@ interactive 卡片
            "image": "收到图片",
            "file": "收到文件",
            "audio": "收到音频",
-           "post": "收到 post",
+           "post": "收到 rich_text",
            "interactive": "收到 card",
        }
        bot.reply_message(
@@ -558,18 +557,26 @@ interactive 卡片
        bot.forward_message("om_xxx", "ou_duty_xxx", receive_id_type="open_id")
 
 
-更新消息
+编辑消息
 ~~~~~~~~
 
-- ``update_message(message_id, msg_type, content)``
-- ``patch_message(message_id, content)``
-- ``update_interactive_card(message_id, card)``
+- ``edit_text_message(message_id, text)``
+- ``edit_post_message(message_id, post_content)``
+- ``edit_card_message(message_id, card)``
+
+注意：
+
+- ``edit_text_message`` / ``edit_post_message`` 底层对应飞书 ``PUT /im/v1/messages/:message_id``，只适用于 ``text`` / ``post`` 消息，也就是文本 / rich_text 消息
+- ``edit_card_message`` 底层对应飞书卡片更新接口，适用于交互式卡片；做“同一条消息持续刷新”的效果时，通常也是走卡片更新
+- 飞书官方限制一条消息最多编辑 ``20`` 次；且只能编辑自己发送、未撤回、未超出可编辑时间的消息
+- 文本 / 富文本和卡片更新接口是分开的，不能混用；例如不能拿卡片 JSON 去调 ``edit_text_message`` / ``edit_post_message``
+- 如果你只是想按消息类型做原位编辑，优先使用这 3 个 ``edit_*`` 接口，不再需要区分旧的底层方法名
 
 示例：把“处理中”卡片更新成“已完成”
 
 .. code-block:: python
 
-   bot.update_interactive_card(
+   bot.edit_card_message(
        message_id="om_xxx",
        card={
            "type": "template",
@@ -580,14 +587,38 @@ interactive 卡片
        }
    )
 
-示例：先发文本，再 patch 成补充说明
+示例：先发文本，再更新文本内容
 
 .. code-block:: python
 
    sent = bot.send_text_to_chat("oc_xxx", "初版结论")
-   bot.patch_message(
-       sent["message_id"],
-       {"content": {"text": "初版结论\n补充说明：影响范围仅限灰度环境"}}
+   bot.edit_text_message(sent["message_id"], "初版结论\n补充说明：影响范围仅限灰度环境")
+
+示例：先发富文本，再更新富文本内容
+
+.. code-block:: python
+
+   post = PostContent(title="阶段播报")
+   post.add_markdown("第一版结果")
+   sent = bot.send_rich_text_to_chat("oc_xxx", post.get_content())
+
+   post2 = PostContent(title="阶段播报")
+   post2.add_markdown("第一版结果\n\n补充：已完成二次校验")
+   bot.edit_post_message(sent["message_id"], post2.get_content())
+
+示例：直接编辑已发送的卡片
+
+.. code-block:: python
+
+   bot.edit_card_message(
+       "om_xxx",
+       {
+           "type": "template",
+           "data": {
+               "template_id": "AAqC5c999",
+               "template_variable": {"status": "处理中", "detail": "第 2 步 / 共 5 步"}
+           }
+       }
    )
 
 
@@ -711,7 +742,7 @@ reaction
 
 设计约束：
 
-- 走的是“先发 interactive 卡片，再反复更新该消息”的路径
+- 走的是“先发 card 卡片，再反复更新该消息”的路径
 - 更新时传入的是“当前完整文本”，不是 delta
 - 默认 ``update_interval=0.25``，是为了尽量避开单消息高频更新限制
 - 卡片默认带 ``config.update_multi=true``
@@ -1032,18 +1063,18 @@ reaction
 
 - ``get_user_info(emails, mobiles)``
 - ``get_group_list()``
-- ``get_group_chat_id_by_name(group_name)``
-- ``get_members_in_group_by_group_chat_id(chat_id)``
-- ``get_member_open_id_by_name(chat_id, member_name)``
+- ``find_chat_ids_by_name(group_name)``
+- ``get_chat_members(chat_id)``
+- ``find_member_open_ids_by_name(chat_id, member_name)``
 - ``get_chat_and_user_name(chat_id, user_id)``
 
 示例：按群名查 ID，再按用户名查成员 open_id
 
 .. code-block:: python
 
-   chat_ids = bot.get_group_chat_id_by_name("项目 Alpha")
+   chat_ids = bot.find_chat_ids_by_name("项目 Alpha")
    if chat_ids:
-       open_ids = bot.get_member_open_id_by_name(chat_ids[0], "Wayne")
+       open_ids = bot.find_member_open_ids_by_name(chat_ids[0], "Wayne")
 
 示例：同时查群名和发件人姓名
 
@@ -1116,7 +1147,7 @@ reaction
 
    card = CardContentV2(title="日报提交")
    card.add_markdown("请点击按钮确认今天已提交日报。")
-   bot.send_interactive_to_chat("oc_xxx", card.get_card())
+   bot.send_card_to_chat("oc_xxx", card.get_card())
 
    # 按钮点击后的更新逻辑放到 LarkBotListener.card_action_handler 中处理
 
@@ -1135,7 +1166,7 @@ reaction
 
 .. code-block:: python
 
-   msg = bot.send_interactive_to_chat(
+   msg = bot.send_card_to_chat(
        "oc_xxx",
        {
            "header": {"title": {"content": "任务状态", "tag": "plain_text"}},
@@ -1143,7 +1174,7 @@ reaction
        }
    )
 
-   bot.update_interactive_card(
+   bot.edit_card_message(
        msg["message_id"],
        {
            "header": {"title": {"content": "任务状态", "tag": "plain_text"}},
@@ -1254,7 +1285,7 @@ reaction
 
    card = CardContentV2(title="欢迎加入")
    card.add_markdown("请查看群公告并完成本周任务认领。")
-   bot.send_interactive_to_chat(chat_id, card.get_card())
+   bot.send_card_to_chat(chat_id, card.get_card())
 
 
 场景 7：长 Markdown 公告自动切片发送
@@ -1262,7 +1293,7 @@ reaction
 
 .. code-block:: python
 
-   bot.send_markdown_to_chat(
+   bot.send_markdown_message_to_chat(
        "oc_xxx",
        md_text=huge_release_note,
        title="发布说明",
@@ -1276,11 +1307,11 @@ reaction
 
 .. code-block:: python
 
-   chat_ids = bot.get_group_chat_id_by_name("值班群")
+   chat_ids = bot.find_chat_ids_by_name("值班群")
    if chat_ids:
        bot.send_text_to_chat(chat_ids[0], "今晚注意观察监控")
 
-   open_ids = bot.get_member_open_id_by_name(chat_ids[0], "Wayne")
+   open_ids = bot.find_member_open_ids_by_name(chat_ids[0], "Wayne")
    if open_ids:
        bot.send_text_to_user(open_ids[0], "请确认值班")
 
@@ -1290,9 +1321,9 @@ reaction
 
 .. code-block:: python
 
-   chat_ids = bot.get_group_chat_id_by_name("测试3")
+   chat_ids = bot.find_chat_ids_by_name("测试3")
    if chat_ids:
-       bot.send_markdown_to_chat(
+       bot.send_markdown_message_to_chat(
            chat_ids[0],
            md_text="# 自动通知\n\n- 功能已发布\n- 请在群内验证",
            title="系统通知"
@@ -1317,7 +1348,7 @@ reaction
    data = bot.get_chat_announcement("oc_xxx")
    card = CardContentV2(title="当前群公告")
    card.add_markdown(str(data))
-   bot.send_interactive_to_chat("oc_xxx", card.get_card())
+   bot.send_card_to_chat("oc_xxx", card.get_card())
 
 
 场景 11：查消息详情 -> 转发 -> 加急 -> 置顶结论
@@ -1337,7 +1368,7 @@ reaction
 --------
 
 1. ``reply_message`` 的 ``content`` 会被自动 JSON 序列化；文本消息通常传 ``{"text": "..."}``。
-2. ``interactive`` 类型发送与更新时，传入的是卡片 JSON，不需要你手动再做 ``json.dumps``。
+2. ``interactive`` 这个飞书类型值对应的是 card 卡片；发送与更新时，传入的是卡片 JSON，不需要你手动再做 ``json.dumps``。
 3. ``reaction`` 的 ``emoji_type`` 不是表情符号本身，而是飞书定义的名称。
 4. ``batch_send_message`` 面向用户 / 部门，不面向群；它和群消息的生命周期不同。
 5. ``set_chat_announcement`` 目前直接暴露飞书 patch 风格参数，适合需要精确控制公告 patch 的场景。

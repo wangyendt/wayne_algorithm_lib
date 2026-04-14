@@ -18,3 +18,10 @@ boto3
 botocore
 setuptools
 qmt
+ahrs
+PyQt5
+opencv-python-headless
+concave_hull
+alphashape
+shapely
+rerun-sdk

@@ -184,7 +184,7 @@ class LarkBotListener:
             md_content = post.make_markdown_content(content)
             post.add_content_in_new_line(md_content)
             # 发送富文本消息
-            self.bot.send_post_to_chat(chat_id, post.get_content())
+            self.bot.send_rich_text_to_chat(chat_id, post.get_content())
             _print_success(f"消息发送成功: {content}")
         except Exception as e:
             _print_error(f"发送消息时发生错误: {e}")
@@ -1233,7 +1233,7 @@ if __name__ == "__main__":
         post.add_content_in_new_line(text_content)
         
         # 发送富文本消息
-        listener.bot.send_post_to_chat(ctx.chat_id, post.get_content())
+        listener.bot.send_rich_text_to_chat(ctx.chat_id, post.get_content())
         _print_success("富文本消息已发送回去")
 
     # 启动服务

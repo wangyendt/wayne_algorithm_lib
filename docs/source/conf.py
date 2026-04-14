@@ -9,7 +9,8 @@
 import os
 import sys
 from datetime import datetime
-sys.path.insert(0, os.path.abspath('../../pywayne' if sys.platform.startswith('win') else '../..'))
+
+sys.path.insert(0, os.path.abspath('../..'))
 from pywayne.__version__ import __version__
 
 
@@ -25,6 +26,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
+    'myst_parser',
     "sphinx_copybutton",
 ]
 
@@ -52,7 +54,6 @@ html_theme = 'sphinx_rtd_theme'
 html_theme_options = {
     'analytics_anonymize_ip': False,
     # 'logo_only': True,
-    'display_version': True,
     'prev_next_buttons_location': 'bottom',
     'style_external_links': False,
     'collapse_navigation': True,

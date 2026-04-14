@@ -23,8 +23,8 @@
   - 音频 ``audio``
   - 媒体 ``media``
   - 贴纸 ``sticker``
-  - 富文本 ``post``
-  - interactive 卡片消息 ``interactive``
+  - rich_text 富文本 ``post``
+  - card 卡片消息 ``interactive``
   - 任意消息类型统一入口 ``listen(message_type=None)``
 
 - 事件监听
@@ -61,7 +61,7 @@
   - ``audio_handler``
   - ``media_handler``
   - ``sticker_handler``
-  - ``listen(message_type="interactive")`` 可直接监听“收到一张卡片消息”
+  - ``listen(message_type="interactive")`` 可直接监听“收到一张 card 卡片消息”
 
 - 事件类型补齐
 
@@ -187,7 +187,7 @@ LarkBotListener 类
 
    **实例属性**
 
-   - ``bot``: 内置 ``LarkBot`` 实例。监听到消息后，如果你要引用回复、加 reaction、撤回、下载资源、更新卡片，都直接复用 ``listener.bot`` 即可。
+   - ``bot``: 内置 ``LarkBot`` 实例。监听到消息后，如果你要引用回复、加 reaction、撤回、下载资源、更新卡片，或者直接编辑已经发出的文本 / 富文本 / 卡片消息，都直接复用 ``listener.bot`` 即可。
 
 
 核心方法
@@ -277,13 +277,13 @@ LarkBotListener 类
 
 .. py:method:: send_message(chat_id: str, content: str)
 
-   一个轻量发送入口。内部使用 post + markdown 内容发送到指定 chat。
+   一个轻量发送入口。内部使用 rich_text + markdown 内容发送到指定 chat。
 
    它适合快速调试，不适合复杂业务。更推荐在正式业务中直接使用 ``listener.bot`` 里的完整接口，比如：
 
    - ``reply_message``
-   - ``send_markdown_to_chat``
-   - ``send_interactive_to_chat``
+   - ``send_markdown_message_to_chat``
+   - ``send_card_to_chat``
 
 
 流式卡片回复
@@ -833,7 +833,7 @@ bot_added_handler / bot_removed_handler
 
    @listener.bot_added_handler()
    async def on_bot_added(chat_id: str, name: str):
-       listener.bot.send_markdown_to_chat(
+      listener.bot.send_markdown_message_to_chat(
            chat_id,
            md_text=f"# {name}\n\n机器人已加入当前群，可直接开始使用。",
            title="机器人入群"
@@ -859,7 +859,7 @@ bot_p2p_chat_entered_handler
 
    @listener.bot_p2p_chat_entered_handler()
    async def on_enter_p2p(chat_id: str, operator_id: str):
-       listener.bot.send_markdown_to_chat(
+      listener.bot.send_markdown_message_to_chat(
            chat_id,
            md_text=(
                "# 欢迎使用机器人\n\n"
@@ -931,7 +931,7 @@ chat_updated_handler / chat_disbanded_handler
 
 .. py:method:: card_action_handler(verification_token: str, encrypt_key: str = "")
 
-   注册 interactive 卡片 action 回调处理器。
+   注册 card 卡片 action 回调处理器。
 
 .. py:method:: get_card_action_handler() -> CardActionHandler
 
@@ -955,7 +955,7 @@ chat_updated_handler / chat_disbanded_handler
                "template_variable": {"status": "已处理"}
            }
        }
-       listener.bot.update_interactive_card(open_message_id, card)
+      listener.bot.edit_card_message(open_message_id, card)
        return {"toast": {"type": "success", "content": "已处理"}}
 
    # FastAPI 示例
@@ -1190,7 +1190,7 @@ chat_updated_handler / chat_disbanded_handler
 
    @listener.bot_added_handler()
    async def on_bot_added(chat_id: str, name: str):
-       listener.bot.send_markdown_to_chat(
+      listener.bot.send_markdown_message_to_chat(
            chat_id,
            md_text=(
                "# 机器人已上线\n\n"
@@ -1327,7 +1327,7 @@ chat_updated_handler / chat_disbanded_handler
    @listener.card_action_handler(verification_token="token_xxx")
    def on_action(card_event):
        open_message_id = card_event.event.context.open_message_id
-       listener.bot.update_interactive_card(
+      listener.bot.edit_card_message(
            open_message_id,
            {
                "type": "template",
@@ -1340,8 +1340,8 @@ chat_updated_handler / chat_disbanded_handler
        return {"toast": {"type": "success", "content": "已更新"}}
 
 
-场景 16：同一个监听器里同时处理文本、图片、文件、音频、post、card
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+场景 16：同一个监听器里同时处理文本、图片、文件、音频、rich_text、card
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -1412,6 +1412,7 @@ chat_updated_handler / chat_disbanded_handler
 如果你只想做“收到消息就按类型回复”，优先用：
 
 - ``listen(message_type="text" | "image" | "file" | "audio" | "post" | "interactive")``
+- 这里的 ``post`` / ``interactive`` 是飞书原始消息类型值，分别表示 rich_text / card
 - 因为你通常还要拿 ``message_id`` 做 ``reply_message`` 和 ``add_reaction``
 
 如果你更在意附件自动下载和自动回传，优先用：
@@ -1436,5 +1437,5 @@ chat_updated_handler / chat_disbanded_handler
 1. ``listen(message_type=...)`` 注册多个 handler 时，某条消息会依次经过多个处理器；不匹配的 handler 会直接跳过。
 2. 自动下载类 decorator 会创建临时文件，处理结束后自动清理；如果你把返回路径指向了别的文件，也会尝试清理那个返回文件。
 3. 如果你要“引用回复”某条消息，请始终保留 ``message_id``，不要只拿 ``chat_id``。
-4. ``interactive`` 消息监听，处理的是“收到一条卡片消息”；卡片按钮点击不是消息，要走 ``card_action_handler``。
+4. ``interactive`` 消息监听，处理的是“收到一条 card 卡片消息”；卡片按钮点击不是消息，要走 ``card_action_handler``。
 5. 私聊 / 群聊名称过滤便于配置，但不如按 ID 稳定；同名群、同名用户场景下建议自行增加二次校验。

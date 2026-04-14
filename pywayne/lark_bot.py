@@ -859,7 +859,7 @@ class LarkBot:
         return response_data.get('items', [])
 
     @lru_cache
-    def get_group_chat_id_by_name(self, group_name: str) -> List[str]:
+    def find_chat_ids_by_name(self, group_name: str) -> List[str]:
         """
         Get chat IDs for groups matching the given name.
 
@@ -872,17 +872,17 @@ class LarkBot:
         return [group['chat_id'] for group in self.get_group_list()
                 if group.get('name') == group_name]
 
-    def get_members_in_group_by_group_chat_id(self, group_chat_id: str) -> List[Dict]:
+    def get_chat_members(self, chat_id: str) -> List[Dict]:
         """
         Get the list of members in a specific group chat.
 
         Args:
-            group_chat_id (str): The chat ID of the group.
+            chat_id (str): The chat ID of the group.
 
         Returns:
             List[Dict]: List of member information in the group.
         """
-        request = GetChatMembersRequest.builder().chat_id(group_chat_id).build()
+        request = GetChatMembersRequest.builder().chat_id(chat_id).build()
         response = self.client.im.v1.chat_members.get(request)
 
         if not response.success():
@@ -896,19 +896,19 @@ class LarkBot:
         return response_data.get('items', [])
 
     @lru_cache
-    def get_member_open_id_by_name(self, group_chat_id: str, member_name: str) -> List[str]:
+    def find_member_open_ids_by_name(self, chat_id: str, member_name: str) -> List[str]:
         """
         Get open IDs for members matching the given name in a group chat.
 
         Args:
-            group_chat_id (str): The chat ID of the group.
+            chat_id (str): The chat ID of the group.
             member_name (str): The name of the member to search for.
 
         Returns:
             List[str]: List of open IDs matching the member name.
         """
         return [member['member_id']
-                for member in self.get_members_in_group_by_group_chat_id(group_chat_id)
+                for member in self.get_chat_members(chat_id)
                 if member.get('name') == member_name]
 
     def _send_message(self,
@@ -1022,13 +1022,13 @@ class LarkBot:
             json.dumps({"image_key": image_key}, ensure_ascii=False)
         )
 
-    def send_interactive_to_user(self, user_open_id: str, interactive: Dict) -> Dict:
+    def send_card_to_user(self, user_open_id: str, card: Dict) -> Dict:
         """
-        Send an interactive message to a specific user.
+        Send a card message to a specific user.
 
         Args:
             user_open_id (str): The open ID of the user.
-            interactive (Dict): The interactive message content.
+            card (Dict): The card message content.
 
         Returns:
             Dict: Dict containing API response data.
@@ -1037,16 +1037,16 @@ class LarkBot:
             'open_id',
             user_open_id,
             'interactive',
-            json.dumps(interactive, ensure_ascii=False)
+            json.dumps(card, ensure_ascii=False)
         )
 
-    def send_interactive_to_chat(self, chat_id: str, interactive: Dict) -> Dict:
+    def send_card_to_chat(self, chat_id: str, card: Dict) -> Dict:
         """
-        Send an interactive message to a specific chat group.
+        Send a card message to a specific chat group.
 
         Args:
             chat_id (str): The chat ID of the group.
-            interactive (Dict): The interactive message content.
+            card (Dict): The card message content.
 
         Returns:
             Dict: Dict containing API response data.
@@ -1055,10 +1055,10 @@ class LarkBot:
             'chat_id',
             chat_id,
             'interactive',
-            json.dumps(interactive, ensure_ascii=False)
+            json.dumps(card, ensure_ascii=False)
         )
 
-    def send_shared_chat_to_user(self, user_open_id: str, shared_chat_id: str) -> Dict:
+    def share_chat_to_user(self, user_open_id: str, shared_chat_id: str) -> Dict:
         """
         Share a chat to a specific user.
 
@@ -1076,7 +1076,7 @@ class LarkBot:
             json.dumps({"chat_id": shared_chat_id}, ensure_ascii=False)
         )
 
-    def send_shared_chat_to_chat(self, chat_id: str, shared_chat_id: str) -> Dict:
+    def share_chat_to_chat(self, chat_id: str, shared_chat_id: str) -> Dict:
         """
         Share a chat to a specific chat group.
 
@@ -1094,7 +1094,7 @@ class LarkBot:
             json.dumps({"chat_id": shared_chat_id}, ensure_ascii=False)
         )
 
-    def send_shared_user_to_user(self, user_open_id: str, shared_user_id: str) -> Dict:
+    def share_user_to_user(self, user_open_id: str, shared_user_id: str) -> Dict:
         """
         Share a user to a specific user.
 
@@ -1112,7 +1112,7 @@ class LarkBot:
             json.dumps({"user_id": shared_user_id}, ensure_ascii=False)
         )
 
-    def send_shared_user_to_chat(self, chat_id: str, shared_user_id: str) -> Dict:
+    def share_user_to_chat(self, chat_id: str, shared_user_id: str) -> Dict:
         """
         Share a user to a specific chat group.
 
@@ -1238,7 +1238,7 @@ class LarkBot:
             json.dumps({"file_key": file_key}, ensure_ascii=False)
         )
 
-    def send_system_msg_to_user(self, user_open_id: str, system_msg_text: str) -> Dict:
+    def send_system_message_to_user(self, user_open_id: str, system_msg_text: str) -> Dict:
         """
         Send a system message to a specific user.
 
@@ -1271,13 +1271,13 @@ class LarkBot:
             json.dumps(system_message, ensure_ascii=False)
         )
 
-    def send_post_to_user(self, user_open_id: str, post_content: Dict[str, str]) -> Dict:
+    def send_rich_text_to_user(self, user_open_id: str, rich_text_content: Dict[str, str]) -> Dict:
         """
         Send a rich post message to a specific user.
 
         Args:
             user_open_id (str): The open ID of the user.
-            post_content (Dict[str, str]): The post content.
+            rich_text_content (Dict[str, str]): The rich text content.
 
         Returns:
             Dict: Dict containing API response data.
@@ -1286,16 +1286,16 @@ class LarkBot:
             'open_id',
             user_open_id,
             'post',
-            json.dumps(post_content, ensure_ascii=False)
+            json.dumps(rich_text_content, ensure_ascii=False)
         )
 
-    def send_post_to_chat(self, chat_id: str, post_content: Dict[str, dict]) -> Dict:
+    def send_rich_text_to_chat(self, chat_id: str, rich_text_content: Dict[str, dict]) -> Dict:
         """
         Send a rich post message to a specific chat group.
 
         Args:
             chat_id (str): The chat ID of the group.
-            post_content (Dict[str, dict]): The post content.
+            rich_text_content (Dict[str, dict]): The rich text content.
 
         Returns:
             Dict: Dict containing API response data.
@@ -1304,17 +1304,17 @@ class LarkBot:
             'chat_id',
             chat_id,
             'post',
-            json.dumps(post_content, ensure_ascii=False)
+            json.dumps(rich_text_content, ensure_ascii=False)
         )
 
-    def send_markdown_to_chat(self,
-                              chat_id: str,
-                              md_text: str,
-                              *,
-                              title: str = "",
-                              prefer: str = "card_v2",
-                              table_fallback: str = "code_block",
-                              max_message_bytes: Optional[int] = None) -> List[Dict]:
+    def send_markdown_message_to_chat(self,
+                                      chat_id: str,
+                                      md_text: str,
+                                      *,
+                                      title: str = "",
+                                      prefer: str = "card_v2",
+                                      table_fallback: str = "code_block",
+                                      max_message_bytes: Optional[int] = None) -> List[Dict]:
         """
         Send markdown content to chat with auto route and byte-size auto chunking.
 
@@ -1352,12 +1352,12 @@ class LarkBot:
             if normalized_prefer == "card_v2":
                 card = CardContentV2(title=chunk_title)
                 card.add_markdown(chunk, max_chunk_bytes=chunk_limit)
-                responses.append(self.send_interactive_to_chat(chat_id, card.get_card()))
+                responses.append(self.send_card_to_chat(chat_id, card.get_card()))
                 continue
 
             post = PostContent(title=chunk_title)
             post.add_markdown(chunk, table_as=table_fallback, max_chunk_bytes=chunk_limit)
-            responses.append(self.send_post_to_chat(chat_id, post.get_content()))
+            responses.append(self.send_rich_text_to_chat(chat_id, post.get_content()))
 
         return responses
 
@@ -1449,7 +1449,7 @@ class LarkBot:
             status_text=status_text if done else (status_text or "Generating..."),
             max_chunk_bytes=max_chunk_bytes,
         )
-        return self.update_interactive_card(message_id, card)
+        return self.edit_card_message(message_id, card)
 
     def recolor_streaming_card(self,
                                message_id: str,
@@ -1709,43 +1709,46 @@ class LarkBot:
         response = self.client.im.v1.message.list(request_builder.build())
         return self._response_to_dict(response, "get_message_list")
 
-    def update_message(self,
-                       message_id: str,
-                       msg_type: str,
-                       content: Union[str, Dict[str, Any], List[Any]]) -> Dict:
+    def edit_text_message(self, message_id: str, text: str) -> Dict:
         """
-        Replace the content of an existing message.
+        Edit a previously sent text message.
         """
         request = UpdateMessageRequest.builder() \
             .message_id(message_id) \
             .request_body(UpdateMessageRequestBody.builder()
-                          .msg_type(msg_type)
-                          .content(self._dump_message_content(content))
+                          .msg_type("text")
+                          .content(self._dump_message_content({"text": text}))
                           .build()) \
             .build()
         response = self.client.im.v1.message.update(request)
-        return self._response_to_dict(response, "update_message")
+        return self._response_to_dict(response, "edit_text_message")
 
-    def patch_message(self,
-                      message_id: str,
-                      content: Union[str, Dict[str, Any], List[Any]]) -> Dict:
+    def edit_post_message(self, message_id: str, post_content: Dict[str, Any]) -> Dict:
         """
-        Partially update message content, commonly used for interactive cards.
+        Edit a previously sent rich-text (`post`) message.
+        """
+        request = UpdateMessageRequest.builder() \
+            .message_id(message_id) \
+            .request_body(UpdateMessageRequestBody.builder()
+                          .msg_type("post")
+                          .content(self._dump_message_content(post_content))
+                          .build()) \
+            .build()
+        response = self.client.im.v1.message.update(request)
+        return self._response_to_dict(response, "edit_post_message")
+
+    def edit_card_message(self, message_id: str, card: Dict[str, Any]) -> Dict:
+        """
+        Edit a previously sent interactive card message.
         """
         request = PatchMessageRequest.builder() \
             .message_id(message_id) \
             .request_body(PatchMessageRequestBody.builder()
-                          .content(self._dump_message_content(content))
+                          .content(self._dump_message_content(card))
                           .build()) \
             .build()
         response = self.client.im.v1.message.patch(request)
-        return self._response_to_dict(response, "patch_message")
-
-    def update_interactive_card(self, message_id: str, card: Dict[str, Any]) -> Dict:
-        """
-        Update an existing interactive card in-place.
-        """
-        return self.patch_message(message_id, card)
+        return self._response_to_dict(response, "edit_card_message")
 
     def get_message_read_users(self,
                                message_id: str,
@@ -2392,19 +2395,19 @@ if __name__ == '__main__':
         _print_info(json.dumps(group_list, indent=2, ensure_ascii=False))
 
         # 2. 获取特定群组的ID
-        group_chat_ids = bot.get_group_chat_id_by_name("测试3")
+        group_chat_ids = bot.find_chat_ids_by_name("测试3")
         if not group_chat_ids:
             _print_warn("未找到群组")
             exit(1)
         group_chat_id = group_chat_ids[0]
 
         # 3. 获取群成员信息
-        members = bot.get_members_in_group_by_group_chat_id(group_chat_id)
+        members = bot.get_chat_members(group_chat_id)
         _print_info("群成员:")
         _print_info(json.dumps(members, indent=2, ensure_ascii=False))
 
         # 4. 获取特定成员的 open_id
-        member_open_ids = bot.get_member_open_id_by_name(group_chat_id, "王也")
+        member_open_ids = bot.find_member_open_ids_by_name(group_chat_id, "王也")
         if not member_open_ids:
             _print_warn("未找到指定成员")
             exit(1)
@@ -2448,16 +2451,16 @@ if __name__ == '__main__':
             _print_success(f"发送图片到群组响应: {json.dumps(image_to_chat_response, indent=2, ensure_ascii=False)}")
 
         # 8. 分享群组和用户
-        share_chat_to_user_response = bot.send_shared_chat_to_user(user_open_id, group_chat_id)
+        share_chat_to_user_response = bot.share_chat_to_user(user_open_id, group_chat_id)
         _print_success(f"分享群组到用户响应: {json.dumps(share_chat_to_user_response, indent=2, ensure_ascii=False)}")
 
-        share_chat_to_chat_response = bot.send_shared_chat_to_chat(group_chat_id, group_chat_id)
+        share_chat_to_chat_response = bot.share_chat_to_chat(group_chat_id, group_chat_id)
         _print_success(f"分享群组到群组响应: {json.dumps(share_chat_to_chat_response, indent=2, ensure_ascii=False)}")
 
-        share_user_to_user_response = bot.send_shared_user_to_user(user_open_id, user_open_id)
+        share_user_to_user_response = bot.share_user_to_user(user_open_id, user_open_id)
         _print_success(f"分享用户到用户响应: {json.dumps(share_user_to_user_response, indent=2, ensure_ascii=False)}")
 
-        share_user_to_chat_response = bot.send_shared_user_to_chat(group_chat_id, user_open_id)
+        share_user_to_chat_response = bot.share_user_to_chat(group_chat_id, user_open_id)
         _print_success(f"分享用户到群组响应: {json.dumps(share_user_to_chat_response, indent=2, ensure_ascii=False)}")
 
         # 9. 上传和发送文件
@@ -2492,7 +2495,7 @@ if __name__ == '__main__':
         post.add_content_in_new_line(line6)
 
         # 发送富文本消息
-        post_response = bot.send_post_to_chat(group_chat_id, post.get_content())
+        post_response = bot.send_rich_text_to_chat(group_chat_id, post.get_content())
         _print_success(f"发送富文本消息响应: {json.dumps(post_response, indent=2, ensure_ascii=False)}")
 
         _print_success("所有示例执行完成")
