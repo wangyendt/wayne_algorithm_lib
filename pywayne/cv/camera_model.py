@@ -9,13 +9,11 @@
 
 
 import os
-import sys
-import subprocess
-import importlib
 import numpy as np
 from typing import Union, Tuple, Dict, Any, List
 from pathlib import Path
 from pywayne.cv.tools import write_cv_yaml # Use write_cv_yaml from tools
+from pywayne.cpp_loader import import_cpp_module
 
 class CameraModel:
     """
@@ -29,10 +27,7 @@ class CameraModel:
         and setting up the camera factory.
         """
         self.camera_models_module = self._check_and_import_lib()
-        if self.camera_models_module:
-            self.camera_factory = self.camera_models_module.CameraFactory.instance()
-        else:
-            self.camera_factory = None # Indicate failure
+        self.camera_factory = self.camera_models_module.CameraFactory.instance()
         self.camera = None # Holds the loaded camera object (pybind wrapper)
         self.parameters = None # Holds the parameters object (pybind wrapper)
 
@@ -45,40 +40,7 @@ class CameraModel:
         lib_name = "camera_models"
         tool_name = "camera_models" # Tool name might be different, adjust if needed
         lib_path = Path(os.path.dirname(os.path.abspath(__file__))) / 'lib'
-
-        # Ensure lib path is in sys.path for import
-        if str(lib_path) not in sys.path:
-             sys.path.append(str(lib_path))
-
-        try:
-            # Try importing first
-            return importlib.import_module(lib_name)
-        except ImportError:
-            print(f"'{lib_name}' module not found. Attempting to acquire using 'gettool'...")
-            try:
-                os.makedirs(lib_path, exist_ok=True)
-                # Ensure gettool is available in PATH or provide full path if necessary
-                subprocess.run(['gettool', tool_name, '-b', '-t', str(lib_path)], check=True)
-                print(f"Successfully acquired '{tool_name}' into {lib_path}")
-                importlib.invalidate_caches() # Ensure import system sees the new module
-                return importlib.import_module(lib_name)
-            except FileNotFoundError:
-                 print(f"Error: 'gettool' command not found. Please ensure it's installed and in your PATH.")
-                 return None
-            except subprocess.CalledProcessError as e:
-                print(f"Error running 'gettool {tool_name}':")
-                print(f"Command: {' '.join(e.cmd)}")
-                print(f"Return Code: {e.returncode}")
-                print(f"Output: {e.output}")
-                print(f"Stderr: {e.stderr}")
-                print(f"Failed to acquire '{tool_name}'. Please check the 'gettool' setup and try again.")
-                return None
-            except ImportError:
-                 print(f"Error: Could not import '{lib_name}' even after running 'gettool'. Check installation.")
-                 return None
-            except Exception as e:
-                print(f"An unexpected error occurred during library acquisition: {e}")
-                return None
+        return import_cpp_module(lib_name, tool_name, lib_path)
 
     def load_from_yaml(self, yaml_path: Union[str, Path]):
         """

@@ -9,9 +9,8 @@
 
 
 import os
-import sys
 import subprocess
-import importlib
+from pywayne.cpp_loader import import_cpp_module
 
 
 class AdbLogcatReader:
@@ -50,14 +49,7 @@ class AdbLogcatReader:
 
     def _check_lib_exists(self):
         lib_path = os.path.join(os.path.dirname(__file__), 'lib')
-        sys.path.append(str(lib_path))
-        try:
-            from adb_logcat_reader import ADBLogcatReader as AdbLogcat
-        except ImportError:
-            os.makedirs(lib_path, exist_ok=True)
-            subprocess.run(['gettool', 'adb_logcat_reader', '-b', '-t', str(lib_path)], check=True)
-            importlib.invalidate_caches()
-            AdbLogcat = importlib.import_module("adb_logcat_reader").ADBLogcatReader
+        AdbLogcat = import_cpp_module("adb_logcat_reader", "adb_logcat_reader", lib_path).ADBLogcatReader
         return AdbLogcat()
 
 

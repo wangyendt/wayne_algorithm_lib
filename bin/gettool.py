@@ -13,15 +13,38 @@ import tempfile
 import shutil
 import subprocess
 import os
+import glob
+import platform
+import sys
 from pywayne.tools import wayne_print, read_yaml_config, write_yaml_config
 
 
 def sparse_clone(url: str, target_dir: str):
-    wayne_print(f"Attempting to clone repository from {url} to {target_dir} with --sparse option...", "cyan")
-    result_sparse = subprocess.run(f'git clone --sparse --progress {url} "{target_dir}"', shell=True, text=True)
+    wayne_print(
+        f"Attempting to clone repository from {url} to {target_dir} with sparse partial clone...",
+        "cyan",
+    )
+    result_sparse = subprocess.run(
+        ["git", "clone", "--sparse", "--filter=blob:none", "--depth", "1", "--progress", url, target_dir],
+        text=True,
+    )
     if result_sparse.returncode != 0:
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir, ignore_errors=True)
+        wayne_print(
+            "Sparse partial clone failed. Retrying plain sparse clone for compatibility...",
+            "yellow",
+        )
+        result_sparse = subprocess.run(
+            ["git", "clone", "--sparse", "--progress", url, target_dir],
+            text=True,
+        )
+
+    if result_sparse.returncode != 0:
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir, ignore_errors=True)
         wayne_print(f'Sparse clone failed. Attempting clone with --no-checkout for manual sparse-checkout init..._OUTPUT', 'yellow')
-        result_no_checkout = subprocess.run(f'git clone --no-checkout --progress {url} "{target_dir}"', shell=True, text=True)
+        result_no_checkout = subprocess.run(["git", "clone", "--no-checkout", "--progress", url, target_dir], text=True)
         if result_no_checkout.returncode == 0:
             cwd = os.getcwd()
             try:
@@ -37,9 +60,9 @@ def sparse_clone(url: str, target_dir: str):
                 os.chdir(cwd)
         else:
             wayne_print(f'Failed to clone repository from {url} to {target_dir} even with --no-checkout.', 'red')
-            exit(0)
+            sys.exit(1)
     else:
-        wayne_print(f'Successfully cloned repository from {url} to {target_dir} with --sparse option.', 'green')
+        wayne_print(f'Successfully cloned repository from {url} to {target_dir} with sparse clone.', 'green')
 
 
 def handle_installation(
@@ -189,6 +212,272 @@ def handle_installation(
         wayne_print(f"An error occurred while running the installation script for {tool_name}: {e}", "red")
 
 
+def _cache_value_to_lib_dirs(value: str):
+    dirs = []
+    if not value or value.endswith("-NOTFOUND"):
+        return dirs
+
+    value = os.path.abspath(value) if value.startswith("~") else value
+    if os.path.isdir(value):
+        parts = value.split(os.sep)
+        if "cmake" in parts:
+            cmake_index = parts.index("cmake")
+            if cmake_index > 0:
+                dirs.append(os.sep.join(parts[:cmake_index]) or os.sep)
+        if os.path.basename(value) in {"lib", "lib64"}:
+            dirs.append(value)
+    elif os.path.isfile(value):
+        dirs.append(os.path.dirname(value))
+    return dirs
+
+
+def _read_cmake_cache_lib_dirs(build_dir: str):
+    cache_path = os.path.join(build_dir, "CMakeCache.txt")
+    dirs = []
+    if not os.path.exists(cache_path):
+        return dirs
+
+    with open(cache_path, "r", errors="ignore") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("//") or line.startswith("#") or "=" not in line:
+                continue
+            key_type, value = line.split("=", 1)
+            key = key_type.split(":", 1)[0]
+            if any(token in key for token in ("DIR", "ROOT", "PREFIX", "LIBRARY", "OpenCV", "Pangolin", "Python")):
+                dirs.extend(_cache_value_to_lib_dirs(value))
+    return dirs
+
+
+def _runtime_search_dirs(target_dir: str, build_dir: str = ""):
+    dirs = [target_dir]
+
+    if build_dir:
+        dirs.extend([
+            os.path.join(os.path.dirname(build_dir), "lib"),
+            os.path.join(build_dir, "lib"),
+            os.path.join(build_dir, "_deps"),
+        ])
+        deps_root = os.path.join(build_dir, "_deps")
+        if os.path.isdir(deps_root):
+            for root, _, files in os.walk(deps_root):
+                if any(f.endswith((".so", ".dylib")) or ".so." in f for f in files):
+                    dirs.append(root)
+        dirs.extend(_read_cmake_cache_lib_dirs(build_dir))
+
+    dirs.extend([
+        os.path.join(sys.prefix, "lib"),
+        os.path.join(sys.prefix, "lib64"),
+        "/usr/local/lib",
+        "/opt/homebrew/lib",
+        "/usr/lib",
+        "/usr/lib64",
+    ])
+
+    for env_name in ("DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"):
+        env_value = os.environ.get(env_name, "")
+        if env_value:
+            dirs.extend([p for p in env_value.split(os.pathsep) if p])
+
+    unique_dirs = []
+    seen = set()
+    for d in dirs:
+        if not d:
+            continue
+        d = os.path.abspath(d)
+        if d in seen or not os.path.isdir(d):
+            continue
+        seen.add(d)
+        unique_dirs.append(d)
+    return unique_dirs
+
+
+def _should_bundle_library(path_or_name: str):
+    base = os.path.basename(path_or_name)
+    allow_prefixes = (
+        "libopencv_",
+        "libethz_apriltag2",
+        "libpango",
+        "libpangolin",
+    )
+    if base.startswith(allow_prefixes):
+        return True
+    return False
+
+
+def _is_system_library(path: str):
+    if not os.path.isabs(path):
+        return False
+    system_roots = (
+        "/usr/lib/",
+        "/System/Library/",
+        "/lib/",
+        "/lib64/",
+    )
+    return path.startswith(system_roots)
+
+
+def _resolve_runtime_dependency(dep: str, loader_dir: str, search_dirs):
+    dep = dep.strip()
+    if not dep:
+        return ""
+
+    candidates = []
+    if dep.startswith("@loader_path/"):
+        candidates.append(os.path.normpath(os.path.join(loader_dir, dep[len("@loader_path/"):])))
+    elif dep.startswith("@executable_path/"):
+        candidates.append(os.path.basename(dep))
+    elif dep.startswith("@rpath/"):
+        candidates.extend(os.path.join(d, dep[len("@rpath/"):]) for d in search_dirs)
+    elif os.path.isabs(dep):
+        candidates.append(dep)
+    else:
+        candidates.extend(os.path.join(d, dep) for d in search_dirs)
+
+    base = os.path.basename(dep)
+    candidates.extend(os.path.join(d, base) for d in search_dirs)
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+    return ""
+
+
+def _mac_runtime_dependencies(binary_path: str):
+    result = subprocess.run(["otool", "-L", binary_path], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return []
+
+    deps = []
+    for line in result.stdout.splitlines()[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        deps.append(line.split(" (", 1)[0])
+    return deps
+
+
+def _linux_runtime_dependencies(binary_path: str):
+    result = subprocess.run(["ldd", binary_path], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return []
+
+    deps = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if "=>" in line:
+            left, right = line.split("=>", 1)
+            dep = right.strip().split(" ", 1)[0]
+            if dep == "not":
+                deps.append(left.strip())
+            else:
+                deps.append(dep)
+        elif line.startswith("/"):
+            deps.append(line.split(" ", 1)[0])
+    return deps
+
+
+def _runtime_dependencies(binary_path: str):
+    system_name = platform.system()
+    if system_name == "Darwin":
+        return _mac_runtime_dependencies(binary_path)
+    if system_name == "Linux":
+        return _linux_runtime_dependencies(binary_path)
+    return []
+
+
+def _runtime_binaries(target_dir: str):
+    patterns = [
+        "*.so",
+        "*.so.*",
+        "*.dylib",
+        "*.cpython-*.so",
+        "*.abi3.so",
+    ]
+    found = []
+    for pattern in patterns:
+        found.extend(glob.glob(os.path.join(target_dir, pattern)))
+    return sorted(set(p for p in found if os.path.isfile(p)))
+
+
+def _ensure_loader_rpath(binary_path: str):
+    if platform.system() != "Darwin":
+        return
+
+    result = subprocess.run(["otool", "-l", binary_path], capture_output=True, text=True, check=False)
+    if result.returncode == 0 and "@loader_path" in result.stdout:
+        return
+
+    subprocess.run(["install_name_tool", "-add_rpath", "@loader_path", binary_path], check=False)
+
+
+def bundle_runtime_dependencies(target_dir: str, build_dir: str = ""):
+    if platform.system() not in {"Darwin", "Linux"}:
+        return
+
+    search_dirs = _runtime_search_dirs(target_dir, build_dir)
+    queue = _runtime_binaries(target_dir)
+    processed = set()
+    copied = []
+    unresolved = []
+
+    while queue:
+        binary = queue.pop(0)
+        if binary in processed:
+            continue
+        processed.add(binary)
+        _ensure_loader_rpath(binary)
+
+        loader_dir = os.path.dirname(binary)
+        for dep in _runtime_dependencies(binary):
+            if _is_system_library(dep) or not _should_bundle_library(dep):
+                continue
+
+            resolved = _resolve_runtime_dependency(dep, loader_dir, search_dirs)
+            if not resolved:
+                unresolved.append(dep)
+                continue
+
+            dest = os.path.join(target_dir, os.path.basename(resolved))
+            if os.path.realpath(dest) == os.path.realpath(resolved):
+                continue
+
+            if not os.path.exists(dest):
+                shutil.copy2(resolved, dest)
+                copied.append(dest)
+                wayne_print(f"Bundled runtime dependency: {resolved} -> {dest}", "green")
+            if dest not in processed:
+                queue.append(dest)
+
+    if copied:
+        wayne_print(f"Bundled {len(copied)} runtime dependencies into {target_dir}.", "green")
+    if unresolved:
+        wayne_print(f"Warning: unresolved runtime dependencies: {sorted(set(unresolved))}", "yellow")
+
+
+def verify_python_module_import(module_name: str, target_dir: str):
+    if not module_name:
+        return True
+
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = target_dir if not existing_pythonpath else target_dir + os.pathsep + existing_pythonpath
+
+    code = (
+        "import importlib, sys; "
+        f"sys.path.insert(0, {target_dir!r}); "
+        f"importlib.import_module({module_name!r}); "
+        f"print('import ok: {module_name}')"
+    )
+    result = subprocess.run([sys.executable, "-c", code], text=True, env=env, check=False)
+    if result.returncode != 0:
+        wayne_print(f"Import verification failed for module '{module_name}' from {target_dir}.", "red")
+        return False
+
+    wayne_print(f"Import verification passed for module '{module_name}'.", "green")
+    return True
+
+
 def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, version=None, install_requested=False, global_install_flag_str="false"):
     print(f"Fetching tool: {tool_name}")
     cwd = os.getcwd()
@@ -217,13 +506,13 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
         if not os.path.exists(name_to_path_map_yaml_file):
             wayne_print(f"Error: {name_to_path_map_yaml_file} not found in the root of {cpp_tools_repo_root}. Cannot proceed.", "red")
             os.chdir(cwd) # Go back to original CWD before exiting temp_dir context
-            return
+            sys.exit(1)
         current_name_to_path_map = read_yaml_config(name_to_path_map_yaml_file)
         
         if tool_name not in current_name_to_path_map:
             wayne_print(f"Error: Tool '{tool_name}' not found in {name_to_path_map_yaml_file}.", "red")
             os.chdir(cwd)
-            return
+            sys.exit(1)
             
         tool_config = current_name_to_path_map[tool_name]
         tool_path_from_yaml = tool_config['path'] # e.g., third_party/eigen
@@ -266,7 +555,7 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
             if clone_result.returncode != 0:
                 wayne_print(f"Failed to clone submodule {tool_name} from {submodule_url} into {final_target_dir}.", "red")
                 os.chdir(cwd)
-                return
+                sys.exit(1)
             wayne_print(f"Successfully cloned {tool_name} into {final_target_dir}", "green")
 
             if version:
@@ -278,6 +567,7 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
                     wayne_print(f"Successfully checked out version {version} for {tool_name}.", 'green')
                 except subprocess.CalledProcessError as e:
                     wayne_print(f"Failed to checkout version {version} for {tool_name}: {e.stderr.strip()}", 'red')
+                    sys.exit(1)
                 finally:
                     os.chdir(checkout_cwd) # CD back to cpp_tools_repo_root
             
@@ -293,23 +583,25 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
             if sparse_set_result.returncode != 0:
                 wayne_print(f"Failed to set sparse-checkout for {tool_path_from_yaml}. Error: {sparse_set_result.stderr.strip()}", "red")
                 os.chdir(cwd)
-                return
+                sys.exit(1)
             
             temp_tool_src_path = os.path.join(cpp_tools_repo_root, tool_path_from_yaml)
             if not os.path.exists(temp_tool_src_path):
                  wayne_print(f"Error: Source path {temp_tool_src_path} for '{tool_name}' does not exist after sparse-checkout set. This should not happen.", "red")
                  os.chdir(cwd)
-                 return
+                 sys.exit(1)
 
             # Build or copytree logic for tools fetched via sparse-checkout
             if build:
                 if not tool_config.get('buildable', False):
                     wayne_print(f'{tool_name} is not buildable, skip building', 'red')
+                    sys.exit(1)
                     # If not buildable but build flag was set, should we copy source like build=false?
                     # For now, do nothing more here, effectively it won't produce a different target_dir than if build was false and no copy happened.
                     # Consider copying source as a fallback if buildable is false but build is true.
                 elif not os.path.exists(os.path.join(temp_tool_src_path, 'CMakeLists.txt')):
                     wayne_print(f'{tool_name} does not have a CMakeLists.txt in {temp_tool_src_path}, skip building', 'red')
+                    sys.exit(1)
                 else:
                     # Restored and adapted build logic for non-submodule (sparse-checkout) tools
                     wayne_print(f"Building {tool_name} in {temp_tool_src_path}...", "blue")
@@ -325,29 +617,25 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
                         
                         wayne_print(f"Running CMake in {os.getcwd()} (source: ..)", "magenta")
                         
-                        # Get python3 executable path
-                        try:
-                            python3_path_result = subprocess.run(["which", "python3"], capture_output=True, text=True, check=True)
-                            python3_path = python3_path_result.stdout.strip()
-                            wayne_print(f"Found python3 at: {python3_path}", "blue")
-                        except subprocess.CalledProcessError:
-                            python3_path = "python3"  # fallback to default
-                            wayne_print("Could not find python3 path, using default 'python3'", "yellow")
+                        python3_path = sys.executable
+                        wayne_print(f"Using current Python executable: {python3_path}", "blue")
                         
                         # Basic CMake command with PYTHON_EXECUTABLE
                         cmake_cmd = ["cmake", f"-DPYTHON_EXECUTABLE={python3_path}", ".."]
                         cmake_process = subprocess.run(cmake_cmd, text=True, check=False)
                         if cmake_process.returncode != 0:
                             wayne_print(f"CMake failed for {tool_name} with return code {cmake_process.returncode}. Check output above.", "red")
+                            sys.exit(cmake_process.returncode)
                         else:
                             wayne_print(f"CMake successful for {tool_name}.", "green")
-                            wayne_print(f"Running make in {os.getcwd()}", "magenta")
+                            wayne_print(f"Running CMake build in {os.getcwd()}", "magenta")
                             num_cores = os.cpu_count() or 1
-                            make_cmd = ["make", f"-j{num_cores}"]
+                            make_cmd = ["cmake", "--build", ".", "--parallel", str(num_cores)]
                             # Basic make command, remove capture_output=True to print log directly
                             make_process = subprocess.run(make_cmd, text=True, check=False)
                             if make_process.returncode != 0:
                                 wayne_print(f"Make failed for {tool_name} with return code {make_process.returncode}. Check output above.", "red")
+                                sys.exit(make_process.returncode)
                             else:
                                 wayne_print(f"Make successful for {tool_name}.", "green")
                                 compiled_lib_path_in_source_tree = os.path.join(temp_tool_src_path, "lib") 
@@ -362,6 +650,10 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
                                     # and if gettool copies this to final_target_dir, final_target_dir becomes the effective 'lib' output.
                                     shutil.copytree(compiled_lib_path_in_source_tree, final_target_dir, dirs_exist_ok=True)
                                     wayne_print(f"Copied compiled library from {compiled_lib_path_in_source_tree} to {final_target_dir}", "green")
+                                    if tool_config.get("bundle_runtime_dependencies", False):
+                                        bundle_runtime_dependencies(final_target_dir, build_dir_in_tool_src)
+                                    if not verify_python_module_import(tool_config.get("python_module", tool_name), final_target_dir):
+                                        sys.exit(1)
                                 else:
                                     # Fallback if even source_dir/lib is not found.
                                     wayne_print(f"Build successful, but expected 'lib' directory not found in {compiled_lib_path_in_source_tree} (source tree). \nAttempting to copy entire source tree {temp_tool_src_path} as fallback, assuming it might be header-only or configured in-place.", "yellow")
@@ -369,8 +661,13 @@ def fetch_tool(url: str, tool_name, target_dir='', build=False, clean=False, ver
                                         shutil.rmtree(final_target_dir)
                                     shutil.copytree(temp_tool_src_path, final_target_dir, dirs_exist_ok=True) 
                                     wayne_print(f"Copied entire source tree from {temp_tool_src_path} to {final_target_dir} as fallback.", "yellow")
+                                    if tool_config.get("bundle_runtime_dependencies", False):
+                                        bundle_runtime_dependencies(final_target_dir, build_dir_in_tool_src)
+                                    if not verify_python_module_import(tool_config.get("python_module", tool_name), final_target_dir):
+                                        sys.exit(1)
                     except Exception as e:
                         wayne_print(f"An error occurred during the build process for {tool_name}: {e}", "red")
+                        sys.exit(1)
                     finally:
                         os.chdir(original_cwd_for_build) # CD back to cpp_tools_repo_root
             else: # Not building (build=False for sparse-checkout tool)

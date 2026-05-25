@@ -8,15 +8,13 @@
 # code is far away from bugs.
 
 
-import sys
-import subprocess
 import os
-import importlib
 import numpy as np
 import pandas as pd
 import time
 import cv2
 from scipy.spatial.transform import Rotation as R
+from pywayne.cpp_loader import import_cpp_module
 
 # 使用类封装颜色常量
 class Colors:
@@ -47,15 +45,7 @@ class PangolinViewer:
     # 恢复用户提供的原始版本
     def _check_lib_exists(self):
         lib_path = os.path.join(os.path.dirname(__file__), 'lib')
-        sys.path.append(str(lib_path))
-        try:
-            # 修复：应该导入外部的pangolin_viewer，而不是自己
-            Viewer = importlib.import_module("pangolin_viewer").PangolinViewer
-        except ImportError:
-            os.makedirs(lib_path, exist_ok=True)
-            subprocess.run(['gettool', 'pangolin_viewer', '-b', '-t', str(lib_path)], check=True)
-            importlib.invalidate_caches()
-            Viewer = importlib.import_module("pangolin_viewer").PangolinViewer
+        Viewer = import_cpp_module("pangolin_viewer", "pangolin_viewer", lib_path).PangolinViewer
         return Viewer(self.width, self.height, self.run_on_start)
 
     def run(self):

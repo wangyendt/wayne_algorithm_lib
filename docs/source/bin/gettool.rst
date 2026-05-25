@@ -1,7 +1,7 @@
 gettool: 获取/安装 C++ 工具集
 ===============================
 
-gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_tools 仓库按需拉取第三方库源码，支持稀疏检出、选择性构建与可选安装。其逻辑包含：仓库稀疏克隆、子模块完整克隆、可选构建、清理式拷贝、安装脚本执行、URL 管理等。
+gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_tools 仓库按需拉取第三方库源码，支持稀疏检出、选择性构建、pybind 模块运行时依赖打包、导入验证与可选安装。其逻辑包含：仓库稀疏克隆、子模块完整克隆、可选构建、清理式拷贝、安装脚本执行、URL 管理等。
 
 基本用法
 --------
@@ -20,7 +20,7 @@ gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_t
 - **name**: 工具名（来自仓库根目录的 name_to_path_map.yaml），可作为位置参数直接指定
 - **-n/--name**: 工具名（与位置参数等效，可选其一）
 - **-t/--target_path**: 目标输出路径（默认根据映射在当前目录展开）
-- **-b/--build**: 构建产生的 lib 输出（若可构建）
+- **-b/--build**: 构建并复制 lib 输出（若可构建）；配置了 Python 模块名时会进行导入验证
 - **-c/--clean**: 仅拷贝 src 与 include（若存在）
 - **-v/--version**: 指定分支/标签（仅当对应项为子模块时生效）
 - **-i/--install**: 拉取后执行安装脚本（若安装信息存在）
@@ -31,13 +31,16 @@ gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_t
 高级说明
 --------
 
-- **稀疏克隆**：默认通过 git clone --sparse 拉取仓库，并按需 sparse-checkout 指定路径，避免下载整个仓库。
+- **稀疏克隆**：默认优先通过 ``git clone --sparse --filter=blob:none --depth 1`` 拉取仓库，并按需 ``sparse-checkout`` 指定路径；若当前 Git 或远端不支持 partial clone，会回退到普通 sparse clone。
 - **子模块判断**：若 name 对应路径是子模块，则直接完整克隆子模块至目标目录；此时 --version 可用于检出分支/标签。
-- **构建逻辑**：当 -b/--build 指定且该工具可构建时，会在源内创建 build 目录并运行 CMake + make，构建过程会自动使用系统 CPU 核心数进行并行编译（-j参数），最后优先复制 source/lib 到目标位置。构建要求：
+- **构建逻辑**：当 -b/--build 指定且该工具可构建时，会在源内创建 build 目录，使用当前运行 gettool 的 Python 解释器作为 ``PYTHON_EXECUTABLE`` 调用 CMake，然后通过 ``cmake --build`` 并行编译，最后优先复制 ``source/lib`` 到目标位置。构建要求：
   
   - 目标工具必须标记为可构建（buildable 属性为 true）
   - 工具目录中必须存在 CMakeLists.txt 文件
+  - 当前环境能找到 CMake、pybind11 和该工具所需的系统依赖
   
+- **运行时依赖打包**：当工具配置了 ``bundle_runtime_dependencies: true`` 时，gettool 会在 macOS 上通过 ``otool``、在 Linux 上通过 ``ldd`` 扫描 pybind 模块依赖，并把允许打包的非系统动态库复制到目标目录。当前主要覆盖 OpenCV、Pangolin 与工具私有动态库等依赖。
+- **导入验证**：当工具配置了 ``python_module`` 时，构建复制完成后会用当前 Python 从目标目录导入该模块。导入失败会使命令返回非零状态，避免出现“构建看似成功但 Python 仍无法 import”的情况。
 - **清理拷贝**：当 -c/--clean 指定时，若存在 src/include，仅复制这两个目录；否则退化为全量拷贝。
 - **安装脚本**：当 -i/--install 指定时，读取 name_to_path_map.yaml 中 installation/install_script 并执行；可选 --global-install-flag 控制是否 sudo 安装。安装过程会自动设置环境变量 NON_INTERACTIVE_INSTALL=true 以支持非交互式安装。
 - **URL 管理**：--set-url/--reset-url/--get-url 操控配置文件 bin/config.yaml，持久化 cpp_tools 仓库地址。
@@ -54,10 +57,11 @@ gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_t
 工作流程（简述）
 ----------------
 
-1. 使用 git clone --sparse 拉取配置与映射
+1. 使用 sparse partial clone 拉取配置与映射
 2. 若名称对应子模块：直接完整克隆到目标目录；可选检出版本
 3. 否则使用 sparse-checkout set 精确拉取路径并拷贝到目标目录
-4. 按需构建或清理拷贝；可选执行安装脚本
+4. 按需构建或清理拷贝；构建模式下可选打包运行时依赖并验证 Python 模块导入
+5. 可选执行安装脚本
 
 基本示例
 --------
@@ -123,9 +127,11 @@ gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_t
 --------
 
 - **子模块与非子模块的区别**：子模块通过独立 git clone 获取完整仓库；非子模块通过 sparse-checkout 获取仓库中的子路径。
-- **构建失败**：请先确保工具具备 CMakeLists.txt 且本机工具链可用；日志中会详细打印 CMake 与 make 的返回。构建时会自动使用 CPU 核心数进行并行编译以提高速度。
+- **构建失败**：请先确保工具具备 CMakeLists.txt 且本机工具链可用；日志中会详细打印 CMake 与 ``cmake --build`` 的返回。构建时会自动使用 CPU 核心数进行并行编译以提高速度。
 - **没有生成 lib**：若构建成功但未生成 lib 目录，脚本会回退为拷贝整个源树，或按 -c 清理拷贝。
-- **Python 环境**：构建时会自动检测并使用系统的 python3 可执行文件路径，通过 -DPYTHON_EXECUTABLE 传递给 CMake。
+- **Python 环境**：构建时会使用当前运行 gettool 的 Python 解释器，通过 ``-DPYTHON_EXECUTABLE`` 传递给 CMake。这样编译出的扩展模块会优先匹配当前 Python ABI。
+- **导入失败**：如果构建完成但导入验证失败，通常是 Python ABI 不匹配、缺少运行时动态库、OpenCV ABI 不一致或目标目录中残留旧模块。请优先查看 gettool 打印的 import 验证错误和动态库打包日志。
+- **代理端口不可用**：如果 GitHub 下载失败，但本机已经开启 7890 代理，先检查 ``git config --global --get http.proxy``、``git config --global --get https.proxy``、``lsof -nP -iTCP:7890 -sTCP:LISTEN``、``nc -vz 127.0.0.1 7890``。在 Codex 等受限沙箱中，localhost 代理连接可能因沙箱限制失败；此时应让执行环境使用提权/非沙箱方式重跑网络检查或 gettool 命令，而不是直接判断代理未开启。
 - **安装过程**：安装脚本会在非交互模式下运行（NON_INTERACTIVE_INSTALL=true），确保自动化流程顺畅。
 - **依赖处理**：如果工具有额外依赖（extra_dependencies），安装时会自动检出这些依赖的源代码。对于子模块依赖，会使用 git submodule update --init；对于普通路径依赖，会添加到 sparse-checkout。
 
@@ -137,5 +143,4 @@ gettool 是安装 pywayne 后提供的命令行脚本，用于从指定的 cpp_t
 - **实时进度显示**：Git 操作使用 --progress 参数，提供实时的下载和克隆进度
 - **资源清理**：使用 Python 的 tempfile.TemporaryDirectory 确保临时文件自动清理
 - **错误恢复**：稀疏克隆失败时自动尝试 --no-checkout 方式并手动初始化 sparse-checkout
-
-
+- **下载范围**：gettool 初始优先使用 ``--filter=blob:none --depth 1``，随后只对目标工具路径执行 ``sparse-checkout set``。仓库中的 ``docs/`` 等目录不会因为存在于仓库中而进入工作区；在支持 partial clone 的远端上，其 blob 内容也不会被下载，除非它们被显式加入 sparse-checkout 或被配置为目标工具路径。``pywayne`` 公共 helper 位于 Python 包仓库，不属于 cpp_tools sparse checkout 范围。
