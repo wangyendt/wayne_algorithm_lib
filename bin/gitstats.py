@@ -2,16 +2,90 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import os
 import subprocess
 import sys
-import os
-from typing import Optional
+from typing import Optional, Tuple
 
-import pandas as pd
+import matplotlib as mpl
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from matplotlib import font_manager
+from matplotlib.ticker import MaxNLocator
 
-from pywayne.plot import parula_map
 from pywayne.tools import wayne_print
+
+
+# Compact code-review dashboard: quiet neutrals, one Git-inspired accent, and a
+# single-hue activity scale that stays perceptually consistent.
+CANVAS = "#FBFCFD"
+PANEL = "#FFFFFF"
+INK = "#18232D"
+MUTED = "#6B7B87"
+GRID = "#E8EDF0"
+ACCENT = "#E4573D"
+ACCENT_DARK = "#BA3E2B"
+STEEL = "#416C7D"
+STEEL_LIGHT = "#AFC2CB"
+
+FIGURE_SIZE = (11, 7.2)
+
+CJK_FONT_CANDIDATES = (
+    "PingFang SC",
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "WenQuanYi Micro Hei",
+    "SimHei",
+    "Arial Unicode MS",
+    "Heiti SC",
+    "Heiti TC",
+    "Songti SC",
+)
+
+HEATMAP_CMAP = sns.light_palette(STEEL, as_cmap=True)
+
+
+def configure_fonts() -> Optional[str]:
+    """Configure a cross-platform font stack with automatic CJK fallback."""
+    installed = {font.name for font in font_manager.fontManager.ttflist}
+    cjk_font = next((name for name in CJK_FONT_CANDIDATES if name in installed), None)
+
+    font_stack = ["DejaVu Sans"]
+    if cjk_font:
+        font_stack.append(cjk_font)
+
+    mpl.rcParams.update(
+        {
+            "font.family": font_stack,
+            "axes.unicode_minus": False,
+            "savefig.facecolor": CANVAS,
+        }
+    )
+    return cjk_font
+
+
+def _configure_theme() -> None:
+    """Apply the Seaborn theme before restoring the CJK-aware font stack."""
+    sns.set_theme(
+        context="notebook",
+        style="whitegrid",
+        rc={
+            "figure.facecolor": CANVAS,
+            "axes.facecolor": PANEL,
+            "axes.edgecolor": GRID,
+            "axes.labelcolor": MUTED,
+            "axes.linewidth": 0.8,
+            "grid.color": GRID,
+            "grid.linewidth": 0.7,
+            "xtick.color": MUTED,
+            "ytick.color": MUTED,
+            "text.color": INK,
+        },
+    )
+    configure_fonts()
 
 
 def get_repo_name(repo: str) -> str:
@@ -58,6 +132,236 @@ def read_commit_times(
     return dt.tz_convert(tz).tz_localize(None)
 
 
+def _prepare_trend(commits: pd.Series) -> Tuple[pd.Series, str]:
+    """Select a readable aggregation level for the visible time span."""
+    span_days = max(1, (commits.index.max() - commits.index.min()).days)
+    if span_days <= 180:
+        frequency, label = "D", "按日"
+    elif span_days <= 3 * 365:
+        frequency, label = "W-MON", "按周"
+    else:
+        frequency, label = "MS", "按月"
+    return commits.resample(frequency).sum(), label
+
+
+def _style_panel(ax: plt.Axes, *, grid: bool = True) -> None:
+    ax.set_facecolor(PANEL)
+    ax.tick_params(axis="both", labelsize=8.5, length=0, pad=5)
+    if grid:
+        ax.grid(axis="y", visible=True)
+        ax.grid(axis="x", visible=False)
+        ax.set_axisbelow(True)
+    else:
+        ax.grid(False)
+    sns.despine(ax=ax, left=True, bottom=True)
+
+
+def _set_panel_title(ax: plt.Axes, title: str) -> None:
+    ax.set_title(title, loc="left", fontsize=10.5, fontweight="semibold", pad=8)
+
+
+def _mark_peak_bar(ax: plt.Axes, index: int, value: int) -> None:
+    peak_bar = ax.patches[index]
+    peak_bar.set_facecolor(ACCENT)
+    ax.annotate(
+        f"{value}",
+        xy=(peak_bar.get_x() + peak_bar.get_width() / 2, peak_bar.get_height()),
+        xytext=(0, 4),
+        textcoords="offset points",
+        ha="center",
+        va="bottom",
+        color=ACCENT_DARK,
+        fontsize=8,
+        fontweight="semibold",
+    )
+
+
+def create_commit_figure(
+    ts: pd.DatetimeIndex, repo_name: str, branch_label: str, timezone: str
+) -> plt.Figure:
+    """Create a compact Seaborn-based dashboard from commit timestamps."""
+    _configure_theme()
+
+    commits = pd.Series(1, index=ts).sort_index()
+    daily = commits.resample("D").sum()
+    trend, trend_label = _prepare_trend(commits)
+    by_hour = (
+        commits.groupby(commits.index.hour).size().reindex(range(24), fill_value=0)
+    )
+    by_dow = (
+        commits.groupby(commits.index.dayofweek).size().reindex(range(7), fill_value=0)
+    )
+    heat = (
+        commits.groupby([commits.index.dayofweek, commits.index.hour])
+        .size()
+        .unstack(fill_value=0)
+        .reindex(index=range(7), columns=range(24), fill_value=0)
+    )
+
+    weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    total_commits = int(commits.sum())
+    active_days = int((daily > 0).sum())
+    date_range = f"{ts.min().date()} — {ts.max().date()}"
+
+    fig = plt.figure(figsize=FIGURE_SIZE, facecolor=CANVAS, constrained_layout=True)
+    grid = fig.add_gridspec(
+        4,
+        2,
+        height_ratios=(0.22, 1.08, 0.92, 0.88),
+        width_ratios=(1, 1),
+    )
+    layout_engine = fig.get_layout_engine() if hasattr(fig, "get_layout_engine") else None
+    if layout_engine is not None:
+        layout_engine.set(w_pad=0.035, h_pad=0.035, wspace=0.06, hspace=0.07)
+    else:
+        fig.set_constrained_layout_pads(
+            w_pad=0.035, h_pad=0.035, wspace=0.06, hspace=0.07
+        )
+
+    header = fig.add_subplot(grid[0, :])
+    header.set_axis_off()
+    header.text(
+        0,
+        0.72,
+        "Git 提交分析",
+        fontsize=17,
+        fontweight="bold",
+        ha="left",
+        va="center",
+    )
+    header.text(
+        0,
+        0.10,
+        f"{repo_name}  /  {branch_label}  /  {timezone}",
+        color=MUTED,
+        fontsize=8.5,
+        ha="left",
+        va="center",
+    )
+    header.text(
+        1,
+        0.67,
+        date_range,
+        fontsize=9.5,
+        fontweight="semibold",
+        ha="right",
+        va="center",
+    )
+    header.text(
+        1,
+        0.10,
+        f"{total_commits:,} 次提交  ·  {active_days:,} 个活跃日",
+        color=MUTED,
+        fontsize=8.5,
+        ha="right",
+        va="center",
+    )
+
+    ax_trend = fig.add_subplot(grid[1, :])
+    _style_panel(ax_trend)
+    _set_panel_title(ax_trend, f"提交趋势  ·  {trend_label}")
+    ax_trend.plot(
+        trend.index,
+        trend.values,
+        color=ACCENT,
+        linewidth=1.8,
+        solid_capstyle="round",
+    )
+    ax_trend.fill_between(
+        trend.index, trend.values, color=ACCENT, alpha=0.09, linewidth=0
+    )
+    peak_period = trend.idxmax()
+    peak_count = int(trend.max())
+    ax_trend.scatter(
+        [peak_period],
+        [peak_count],
+        s=25,
+        color=ACCENT,
+        edgecolor=PANEL,
+        linewidth=1,
+        zorder=4,
+    )
+    ax_trend.annotate(
+        f"最高 {peak_count}",
+        xy=(peak_period, peak_count),
+        xytext=(0, 7),
+        textcoords="offset points",
+        ha="center",
+        color=ACCENT_DARK,
+        fontsize=8,
+        fontweight="semibold",
+    )
+    date_locator = mdates.AutoDateLocator(minticks=4, maxticks=7)
+    ax_trend.xaxis.set_major_locator(date_locator)
+    ax_trend.xaxis.set_major_formatter(mdates.ConciseDateFormatter(date_locator))
+    ax_trend.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+    ax_trend.set(xlabel=None, ylabel=None)
+    ax_trend.set_ylim(bottom=0, top=max(1, peak_count * 1.20))
+    ax_trend.margins(x=0.006)
+
+    ax_hour = fig.add_subplot(grid[2, 0])
+    _style_panel(ax_hour)
+    _set_panel_title(ax_hour, "提交时段")
+    ax_hour.bar(
+        range(24),
+        by_hour.values,
+        color=STEEL_LIGHT,
+        width=0.72,
+        edgecolor="none",
+    )
+    peak_hour = int(by_hour.values.argmax())
+    _mark_peak_bar(ax_hour, peak_hour, int(by_hour.iloc[peak_hour]))
+    hour_ticks = list(range(0, 24, 3))
+    ax_hour.set_xticks(hour_ticks, labels=[f"{hour:02d}" for hour in hour_ticks])
+    ax_hour.set(xlabel="小时", ylabel=None)
+    ax_hour.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+    ax_hour.set_ylim(0, max(1, int(by_hour.max()) * 1.18))
+
+    ax_weekday = fig.add_subplot(grid[2, 1])
+    _style_panel(ax_weekday)
+    _set_panel_title(ax_weekday, "星期分布")
+    ax_weekday.bar(
+        range(7),
+        by_dow.values,
+        color=STEEL,
+        width=0.62,
+        edgecolor="none",
+    )
+    peak_weekday = int(by_dow.values.argmax())
+    _mark_peak_bar(ax_weekday, peak_weekday, int(by_dow.iloc[peak_weekday]))
+    ax_weekday.set_xticks(range(7), labels=weekdays)
+    ax_weekday.set(xlabel=None, ylabel=None)
+    ax_weekday.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+    ax_weekday.set_ylim(0, max(1, int(by_dow.max()) * 1.18))
+
+    ax_heatmap = fig.add_subplot(grid[3, :])
+    _style_panel(ax_heatmap, grid=False)
+    _set_panel_title(ax_heatmap, "活跃时段  ·  星期 × 小时")
+    heat.index = weekdays
+    heat.columns = [f"{hour:02d}" for hour in range(24)]
+    sns.heatmap(
+        heat,
+        ax=ax_heatmap,
+        cmap=HEATMAP_CMAP,
+        vmin=0,
+        linewidths=0.45,
+        linecolor=PANEL,
+        xticklabels=2,
+        yticklabels=True,
+        cbar_kws={"shrink": 0.78, "pad": 0.012, "aspect": 18},
+    )
+    ax_heatmap.set(xlabel="小时", ylabel=None)
+    ax_heatmap.tick_params(axis="x", rotation=0)
+    ax_heatmap.tick_params(axis="y", rotation=0)
+    colorbar = ax_heatmap.collections[0].colorbar
+    colorbar.outline.set_visible(False)
+    colorbar.ax.tick_params(labelsize=7.5, length=0)
+    colorbar.locator = MaxNLocator(nbins=4, integer=True)
+    colorbar.update_ticks()
+
+    return fig
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="统计 Git 提交时间分布并输出图表")
     ap.add_argument("repo", nargs="?", default=".", help="git 仓库路径，默认当前目录")
@@ -67,7 +371,13 @@ def main() -> None:
     ap.add_argument("--branch", default=None, help="只统计指定分支，如 main 或 origin/main")
     ap.add_argument("--all", action="store_true", help="统计所有分支（忽略 --branch）")
     ap.add_argument("--save", default="git_time_distribution.png", help="图片输出路径")
-    ap.add_argument("-p", "--show-plot", "--show_plot", action="store_true", help="弹窗展示图表（不保存文件）")
+    ap.add_argument(
+        "-p",
+        "--show-plot",
+        "--show_plot",
+        action="store_true",
+        help="弹窗展示图表（不保存文件）",
+    )
 
     args = ap.parse_args()
 
@@ -78,72 +388,20 @@ def main() -> None:
         ts = read_commit_times(
             args.repo, args.since, args.until, args.tz, args.branch, args.all
         )
-    except subprocess.CalledProcessError as e:
-        sys.exit(f"[git 调用失败]\n{e}")
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"[git 调用失败]\n{error}")
     if ts.empty:
         sys.exit("没有读到提交记录。检查仓库路径、分支名或时间过滤条件。")
 
-    s = pd.Series(1, index=ts).sort_index()
-
-    daily = s.resample("D").sum()
-    by_hour = s.groupby(s.index.hour).size().reindex(range(24), fill_value=0)
-    by_dow = s.groupby(s.index.dayofweek).size().reindex(range(7), fill_value=0)
-    heat = (
-        s.groupby([s.index.dayofweek, s.index.hour])
-        .size()
-        .unstack(fill_value=0)
-        .reindex(index=range(7), columns=range(24), fill_value=0)
-    )
-
-    weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    by_dow.index = weekdays
-
-    fig = plt.figure(figsize=(12, 9))
-    gs = fig.add_gridspec(3, 2, hspace=0.35, wspace=0.15)
-
-    # 顶部标题：项目名 + 分支 + 时区
-    title = f"{repo_name} · {branch_label} · {args.tz}"
-    fig.suptitle(f"Git Commit Time Distribution — {title}", y=0.98, fontsize=13)
-
-    ax1 = fig.add_subplot(gs[0, :])
-    daily.plot(ax=ax1)
-    ax1.set_title("Commits per Day")
-    ax1.set_ylabel("Commits")
-    ax1.grid(True, alpha=0.3)
-
-    ax2 = fig.add_subplot(gs[1, 0])
-    by_hour.plot(kind="bar", ax=ax2)
-    ax2.set_title("Commits by Hour (0–23)")
-    ax2.set_xlabel("Hour")
-    ax2.set_ylabel("Commits")
-
-    ax3 = fig.add_subplot(gs[1, 1])
-    by_dow.plot(kind="bar", ax=ax3)
-    ax3.set_title("Commits by Weekday")
-    ax3.set_ylabel("Commits")
-
-    ax4 = fig.add_subplot(gs[2, :])
-    im = ax4.imshow(heat.values, aspect="auto", cmap=parula_map)
-    ax4.set_title("Heatmap: Weekday × Hour")
-    ax4.set_yticks(range(7), labels=weekdays)
-    ax4.set_xlabel("Hour")
-    cbar = fig.colorbar(im, ax=ax4)
-    cbar.set_label("Commits")
-
-    # 角落里补充时间范围与提交数
-    rng = f"{ts.min().date()} → {ts.max().date()}"
-    fig.text(0.01, 0.005, f"Range: {rng} | Commits: {int(s.sum())}", fontsize=9, alpha=0.8)
-
-    fig.tight_layout()
+    fig = create_commit_figure(ts, repo_name, branch_label, args.tz)
 
     if args.show_plot:
         plt.show()
     else:
-        fig.savefig(args.save, dpi=150)
-        wayne_print(f"Saved: {args.save}", 'green')
+        fig.savefig(args.save, dpi=160)
+        plt.close(fig)
+        wayne_print(f"Saved: {args.save}", "green")
 
 
 if __name__ == "__main__":
     main()
-
-
