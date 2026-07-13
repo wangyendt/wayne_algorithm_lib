@@ -5,6 +5,7 @@ import argparse
 import os
 import subprocess
 import sys
+import warnings
 from typing import Optional, Tuple
 
 import matplotlib as mpl
@@ -13,6 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from matplotlib import font_manager
+from matplotlib.ft2font import FT2Font
 from matplotlib.ticker import MaxNLocator
 
 from pywayne.tools import wayne_print
@@ -36,8 +38,21 @@ CJK_FONT_CANDIDATES = (
     "PingFang SC",
     "Microsoft YaHei",
     "Noto Sans CJK SC",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK TC",
+    "Noto Sans CJK HK",
+    "Noto Sans SC",
+    "Noto Sans TC",
+    "Noto Sans JP",
     "Source Han Sans SC",
+    "Source Han Sans CN",
+    "Hiragino Sans GB",
     "WenQuanYi Micro Hei",
+    "WenQuanYi Zen Hei",
+    "Droid Sans Fallback",
+    "AR PL UKai CN",
+    "AR PL UMing CN",
+    "Unifont",
     "SimHei",
     "Arial Unicode MS",
     "Heiti SC",
@@ -45,13 +60,82 @@ CJK_FONT_CANDIDATES = (
     "Songti SC",
 )
 
+CJK_TEST_TEXT = "中文提交分析趋势时段星期分布活跃最高次数日周月小时"
+
+CHART_TEXT = {
+    "zh": {
+        "title": "Git 提交分析",
+        "summary": "{commits:,} 次提交  ·  {days:,} 个活跃日",
+        "trend": "提交趋势  ·  {period}",
+        "periods": {"day": "按日", "week": "按周", "month": "按月"},
+        "peak": "最高 {count}",
+        "hour_title": "提交时段",
+        "hour": "小时",
+        "weekday_title": "星期分布",
+        "weekdays": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+        "heatmap_title": "活跃时段  ·  星期 × 小时",
+    },
+    "en": {
+        "title": "Git Commit Analysis",
+        "summary": "{commits:,} commits  ·  {days:,} active days",
+        "trend": "Commit trend  ·  {period}",
+        "periods": {"day": "Daily", "week": "Weekly", "month": "Monthly"},
+        "peak": "Peak {count}",
+        "hour_title": "Commits by hour",
+        "hour": "Hour",
+        "weekday_title": "Commits by weekday",
+        "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "heatmap_title": "Activity  ·  Weekday x Hour",
+    },
+}
+
 HEATMAP_CMAP = sns.light_palette(STEEL, as_cmap=True)
 
 
+def _refresh_system_fonts() -> None:
+    """Register fonts installed after Matplotlib's font cache was created."""
+    registered = {
+        os.path.realpath(entry.fname) for entry in font_manager.fontManager.ttflist
+    }
+    for path in font_manager.findSystemFonts():
+        if os.path.realpath(path) in registered:
+            continue
+        try:
+            font_manager.fontManager.addfont(path)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            continue
+
+
+def _font_supports_text(font_path: str, text: str) -> bool:
+    """Return whether a font file contains every glyph needed by ``text``."""
+    try:
+        charmap = FT2Font(font_path).get_charmap()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return all(ord(character) in charmap for character in text)
+
+
+def _find_cjk_font() -> Optional[str]:
+    """Find a real CJK-capable font, preferring common platform families."""
+    _refresh_system_fonts()
+    entries = font_manager.fontManager.ttflist
+
+    for candidate in CJK_FONT_CANDIDATES:
+        for entry in entries:
+            if entry.name.casefold() == candidate.casefold() and _font_supports_text(
+                entry.fname, CJK_TEST_TEXT
+            ):
+                return entry.name
+
+    for entry in entries:
+        if _font_supports_text(entry.fname, CJK_TEST_TEXT):
+            return entry.name
+    return None
+
+
 def configure_fonts() -> Optional[str]:
-    """Configure a cross-platform font stack with automatic CJK fallback."""
-    installed = {font.name for font in font_manager.fontManager.ttflist}
-    cjk_font = next((name for name in CJK_FONT_CANDIDATES if name in installed), None)
+    """Configure a font stack after verifying that its CJK glyphs exist."""
+    cjk_font = _find_cjk_font()
 
     font_stack = ["DejaVu Sans"]
     if cjk_font:
@@ -67,7 +151,7 @@ def configure_fonts() -> Optional[str]:
     return cjk_font
 
 
-def _configure_theme() -> None:
+def _configure_theme() -> Optional[str]:
     """Apply the Seaborn theme before restoring the CJK-aware font stack."""
     sns.set_theme(
         context="notebook",
@@ -85,7 +169,7 @@ def _configure_theme() -> None:
             "text.color": INK,
         },
     )
-    configure_fonts()
+    return configure_fonts()
 
 
 def get_repo_name(repo: str) -> str:
@@ -136,12 +220,33 @@ def _prepare_trend(commits: pd.Series) -> Tuple[pd.Series, str]:
     """Select a readable aggregation level for the visible time span."""
     span_days = max(1, (commits.index.max() - commits.index.min()).days)
     if span_days <= 180:
-        frequency, label = "D", "按日"
+        frequency, period = "D", "day"
     elif span_days <= 3 * 365:
-        frequency, label = "W-MON", "按周"
+        frequency, period = "W-MON", "week"
     else:
-        frequency, label = "MS", "按月"
-    return commits.resample(frequency).sum(), label
+        frequency, period = "MS", "month"
+    return commits.resample(frequency).sum(), period
+
+
+def _ascii_safe(value: str) -> str:
+    """Keep dynamic repository metadata readable without a Unicode font."""
+    return value.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
+def _date_formatter(locator: mdates.AutoDateLocator) -> mdates.ConciseDateFormatter:
+    """Create a locale-independent formatter using only numeric date fields."""
+    formatter = mdates.ConciseDateFormatter(locator)
+    formatter.formats = ["%Y", "%m", "%d", "%H:%M", "%H:%M", "%S"]
+    formatter.zero_formats = ["", "%Y", "%m", "%m-%d", "%H:%M", "%H:%M"]
+    formatter.offset_formats = [
+        "",
+        "%Y",
+        "%Y-%m",
+        "%Y-%m-%d",
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M",
+    ]
+    return formatter
 
 
 def _style_panel(ax: plt.Axes, *, grid: bool = True) -> None:
@@ -180,11 +285,22 @@ def create_commit_figure(
     ts: pd.DatetimeIndex, repo_name: str, branch_label: str, timezone: str
 ) -> plt.Figure:
     """Create a compact Seaborn-based dashboard from commit timestamps."""
-    _configure_theme()
+    cjk_font = _configure_theme()
+    language = "zh" if cjk_font else "en"
+    text = CHART_TEXT[language]
+    if cjk_font is None:
+        warnings.warn(
+            "No CJK-capable font was found; using English chart labels. "
+            "On Ubuntu, install one with: sudo apt install fonts-noto-cjk",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        repo_name = _ascii_safe(repo_name)
+        branch_label = _ascii_safe(branch_label)
 
     commits = pd.Series(1, index=ts).sort_index()
     daily = commits.resample("D").sum()
-    trend, trend_label = _prepare_trend(commits)
+    trend, trend_period = _prepare_trend(commits)
     by_hour = (
         commits.groupby(commits.index.hour).size().reindex(range(24), fill_value=0)
     )
@@ -198,7 +314,7 @@ def create_commit_figure(
         .reindex(index=range(7), columns=range(24), fill_value=0)
     )
 
-    weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekdays = text["weekdays"]
     total_commits = int(commits.sum())
     active_days = int((daily > 0).sum())
     date_range = f"{ts.min().date()} — {ts.max().date()}"
@@ -223,7 +339,7 @@ def create_commit_figure(
     header.text(
         0,
         0.72,
-        "Git 提交分析",
+        text["title"],
         fontsize=17,
         fontweight="bold",
         ha="left",
@@ -250,7 +366,7 @@ def create_commit_figure(
     header.text(
         1,
         0.10,
-        f"{total_commits:,} 次提交  ·  {active_days:,} 个活跃日",
+        text["summary"].format(commits=total_commits, days=active_days),
         color=MUTED,
         fontsize=8.5,
         ha="right",
@@ -259,7 +375,10 @@ def create_commit_figure(
 
     ax_trend = fig.add_subplot(grid[1, :])
     _style_panel(ax_trend)
-    _set_panel_title(ax_trend, f"提交趋势  ·  {trend_label}")
+    _set_panel_title(
+        ax_trend,
+        text["trend"].format(period=text["periods"][trend_period]),
+    )
     ax_trend.plot(
         trend.index,
         trend.values,
@@ -282,7 +401,7 @@ def create_commit_figure(
         zorder=4,
     )
     ax_trend.annotate(
-        f"最高 {peak_count}",
+        text["peak"].format(count=peak_count),
         xy=(peak_period, peak_count),
         xytext=(0, 7),
         textcoords="offset points",
@@ -293,7 +412,7 @@ def create_commit_figure(
     )
     date_locator = mdates.AutoDateLocator(minticks=4, maxticks=7)
     ax_trend.xaxis.set_major_locator(date_locator)
-    ax_trend.xaxis.set_major_formatter(mdates.ConciseDateFormatter(date_locator))
+    ax_trend.xaxis.set_major_formatter(_date_formatter(date_locator))
     ax_trend.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
     ax_trend.set(xlabel=None, ylabel=None)
     ax_trend.set_ylim(bottom=0, top=max(1, peak_count * 1.20))
@@ -301,7 +420,7 @@ def create_commit_figure(
 
     ax_hour = fig.add_subplot(grid[2, 0])
     _style_panel(ax_hour)
-    _set_panel_title(ax_hour, "提交时段")
+    _set_panel_title(ax_hour, text["hour_title"])
     ax_hour.bar(
         range(24),
         by_hour.values,
@@ -313,13 +432,13 @@ def create_commit_figure(
     _mark_peak_bar(ax_hour, peak_hour, int(by_hour.iloc[peak_hour]))
     hour_ticks = list(range(0, 24, 3))
     ax_hour.set_xticks(hour_ticks, labels=[f"{hour:02d}" for hour in hour_ticks])
-    ax_hour.set(xlabel="小时", ylabel=None)
+    ax_hour.set(xlabel=text["hour"], ylabel=None)
     ax_hour.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
     ax_hour.set_ylim(0, max(1, int(by_hour.max()) * 1.18))
 
     ax_weekday = fig.add_subplot(grid[2, 1])
     _style_panel(ax_weekday)
-    _set_panel_title(ax_weekday, "星期分布")
+    _set_panel_title(ax_weekday, text["weekday_title"])
     ax_weekday.bar(
         range(7),
         by_dow.values,
@@ -336,7 +455,7 @@ def create_commit_figure(
 
     ax_heatmap = fig.add_subplot(grid[3, :])
     _style_panel(ax_heatmap, grid=False)
-    _set_panel_title(ax_heatmap, "活跃时段  ·  星期 × 小时")
+    _set_panel_title(ax_heatmap, text["heatmap_title"])
     heat.index = weekdays
     heat.columns = [f"{hour:02d}" for hour in range(24)]
     sns.heatmap(
@@ -350,7 +469,7 @@ def create_commit_figure(
         yticklabels=True,
         cbar_kws={"shrink": 0.78, "pad": 0.012, "aspect": 18},
     )
-    ax_heatmap.set(xlabel="小时", ylabel=None)
+    ax_heatmap.set(xlabel=text["hour"], ylabel=None)
     ax_heatmap.tick_params(axis="x", rotation=0)
     ax_heatmap.tick_params(axis="y", rotation=0)
     colorbar = ax_heatmap.collections[0].colorbar
