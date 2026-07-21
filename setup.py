@@ -80,6 +80,7 @@ setuptools.setup(
     install_requires=core_reqs,
     extras_require={
         'full': optional_reqs,
+        'performance': ["numba"],
         'gui': ["easygui", "pynput"],
         'aws': ["boto3", "botocore"],
         'geo': ["concave_hull", "alphashape", "shapely"],

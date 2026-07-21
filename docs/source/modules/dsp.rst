@@ -31,11 +31,13 @@
    **示例**::
 
       filtered_signal = butter_bandpass_filter(signal, order=3, lo=0.5, hi=40, fs=250, btype='bandpass')
-      
+
 
 2. .. py:class:: ButterworthFilter
 
-   纯 numpy 实现的巴特沃斯滤波器类，提供完整的 1D IIR 滤波功能。
+   基于 NumPy 的巴特沃斯 1D IIR 滤波器，同时支持传递函数 ``ba`` 和数值更稳定的
+   二阶节级联 ``sos``。两种模式都使用 Direct Form II Transposed 执行，数值结果与
+   SciPy ``lfilter``/``sosfilt`` 及 ``filtfilt``/``sosfiltfilt`` 对齐。
 
    **构造方法**:
 
@@ -63,7 +65,17 @@
 
      - ButterworthFilter 实例。
 
-   - **from_params(cls, order, fs, btype, cutoff, cache_zi=True)** (类方法)
+   - **from_sos(cls, sos, cache_zi=True)** (类方法)
+
+     通过 SciPy 格式的 SOS 矩阵创建滤波器，推荐用于高阶、窄带或截止频率接近
+     0/Nyquist 的设计。
+
+     **参数**:
+
+     - **sos**: ``(n_sections, 6)`` 矩阵，每行为 ``[b0, b1, b2, a0, a1, a2]``。
+     - **cache_zi**: 是否预计算 SOS 稳态初始条件。
+
+   - **from_params(cls, order, fs, btype, cutoff, cache_zi=True, output='ba')** (类方法)
 
      通过滤波器参数设计并创建实例。
 
@@ -74,6 +86,7 @@
      - **btype**: 滤波器类型，可选 'lowpass', 'highpass', 'bandpass', 'bandstop'。
      - **cutoff**: 截止频率（Hz），低通/高通为单个浮点数，带通/带阻为 (low, high) 元组。
      - **cache_zi**: 是否预计算初始条件。
+     - **output**: ``'ba'`` 或 ``'sos'``。高阶滤波器推荐 ``'sos'``。
 
      **返回**:
 
@@ -81,7 +94,9 @@
 
    **属性**:
 
-   - **ba**: 返回 (b, a) 系数元组。
+   - **mode**: 返回当前 ``'ba'`` 或 ``'sos'`` 模式。
+   - **ba**: BA 模式下返回 (b, a) 系数元组。
+   - **sos**: SOS 模式下返回归一化后的 SOS 矩阵。
    - **ntaps**: 滤波器抽头数（taps）。
    - **nstate**: 滤波器状态数。
 
@@ -93,16 +108,16 @@
 
      **返回**:
 
-     - 初始状态数组。
+     - BA 模式返回一维数组；SOS 模式返回 ``(n_sections, 2)`` 数组。
 
    - **lfilter(self, x, zi=None) -> Tuple[np.ndarray, np.ndarray]**
 
-     Direct Form II Transposed 滤波（单向）。
+     Direct Form II Transposed 单向滤波。在 SOS 模式下自动逐个二阶节级联执行。
 
      **参数**:
 
      - **x**: 输入信号。
-     - **zi**: 初始状态，可选。
+     - **zi**: 初始状态，可选。SOS 模式接受 ``(n_sections, 2)`` 或等价扁平数组。
 
      **返回**:
 
@@ -124,6 +139,9 @@
 
    **静态方法**:
 
+   - **lfilter_zi(b, a)**: 计算与 SciPy ``lfilter_zi`` 对齐的 BA 稳态初始条件。
+   - **sosfilt_zi(sos)**: 计算与 SciPy ``sosfilt_zi`` 对齐的 SOS 稳态初始条件。
+
    - **detrend(x, method='linear', poly_order=2)** (静态方法)
 
      信号去趋势处理。
@@ -140,20 +158,39 @@
 
    **应用场景**:
 
-   纯 numpy 实现的滤波器，无需依赖 SciPy，适合需要移植或自定义的场景。支持多种构造方式和滤波模式，可用于实时滤波、离线数据处理、信号预处理等。
+   BA/SOS 执行核心均使用 NumPy 实现，可用于实时流式滤波、离线前后向滤波和信号预处理。
+   ``from_params(..., output='sos')`` 借助 SciPy 生成稳定的 SOS 节配对。
 
    **示例**::
 
       # 方式1: 通过参数设计
       bf = ButterworthFilter.from_params(order=4, fs=200, btype='bandpass', cutoff=(1, 50))
       filtered = bf.filtfilt(signal)
-      
+
       # 方式2: 通过系数构造
       bf2 = ButterworthFilter.from_ba(b, a)
       y, zf = bf2.lfilter(signal)
-      
+
+      # 方式3: SOS（高阶/窄带推荐）
+      bf_sos = ButterworthFilter.from_params(
+          order=8, fs=200, btype='bandpass', cutoff=(0.1, 10), output='sos'
+      )
+
+      # 流式执行：首段稳态初始化，后续传递 zf
+      state = bf_sos.zi() * chunks[0][0]
+      outputs = []
+      for chunk in chunks:
+          y, state = bf_sos.lfilter(chunk, zi=state)
+          outputs.append(y)
+
       # 去趋势
       detrended = ButterworthFilter.detrend(signal, method='linear')
+
+   .. note::
+
+      ``filtfilt`` 为非实时前后向处理，零相位但仍可能出现边界效应。在线处理应使用
+      ``lfilter``，首段通常使用 ``zi() * x[0]``，后续每段把上一段返回的 ``zf``
+      作为新的 ``zi``。
 
 峰值检测
 -----------
@@ -287,7 +324,7 @@
 
    **方法**:
 
-   - **dtw(self, x, y, mode='global', *params)**
+   - **dtw(self, x, y, mode='global', *params, backend='auto')**
 
      计算两条曲线之间的DTW距离。
 
@@ -296,7 +333,8 @@
      - **x**: 第一条曲线数据。
      - **y**: 第二条曲线数据。
      - **mode**: 计算模式，默认为 'global'。
-     - **params**: 其他可选参数。
+     - **params**: ``local`` 模式所需的正整数窗口长度。
+     - **backend**: ``auto``、``python`` 或 ``numba``。``auto`` 优先使用 Numba，未安装时自动回退到 Python。
 
      **返回**:
 
@@ -311,6 +349,15 @@
       similarity = CurveSimilarity()
       distance = similarity.dtw(curve1, curve2)
       print(f"DTW距离: {distance}")
+
+      # 强制使用纯 Python 参考实现
+      distance_python = similarity.dtw(curve1, curve2, backend='python')
+
+      # 安装 pip install "pywayne[performance]" 后可强制使用 Numba
+      distance_numba = similarity.dtw(curve1, curve2, backend='numba')
+
+   Numba 为可选依赖，适合重复调用或较长曲线。首次调用会进行 JIT 编译；短生命周期脚本可使用
+   ``backend='python'`` 避免编译启动开销。Python 与 Numba 后端保持相同的历史评分语义。
 
 其他工具
 -----------
@@ -393,4 +440,4 @@
 
 --------------------------------------------------
 
-以上详细介绍了dsp模块中各个函数和类的用途、应用场景以及示例代码，可帮助用户快速理解和使用数字信号处理相关工具。 
+以上详细介绍了dsp模块中各个函数和类的用途、应用场景以及示例代码，可帮助用户快速理解和使用数字信号处理相关工具。

@@ -10,7 +10,6 @@
 
 import numpy as np
 import qmt
-from ahrs import Quaternion
 import matplotlib.pyplot as plt
 
 
@@ -20,9 +19,16 @@ def SE3_to_pose(SE3_mat: np.ndarray) -> np.ndarray:
     :param SE3_mat: N个SE(3)
     :return: N个pose, tx, ty, tz, qw, qx, qy, qz
     """
-    SE3_mat = SE3_mat[None, ...] if SE3_mat.ndim == 2 else SE3_mat
-    pose = np.array([np.concatenate([SE3[:3, 3], qmt.quatFromRotMat(SE3[:3, :3])]) for SE3 in SE3_mat])
-    return pose
+    SE3_mat = np.asarray(SE3_mat, dtype=np.float64)
+    if SE3_mat.ndim == 2:
+        if SE3_mat.shape != (4, 4):
+            raise ValueError(f"single SE(3) input must have shape (4, 4), got {SE3_mat.shape}")
+        SE3_mat = SE3_mat[None, ...]
+    elif SE3_mat.ndim != 3 or SE3_mat.shape[1:] != (4, 4):
+        raise ValueError(f"SE(3) input must have shape (4, 4) or (N, 4, 4), got {SE3_mat.shape}")
+
+    quaternions = qmt.quatFromRotMat(SE3_mat[:, :3, :3])
+    return np.concatenate([SE3_mat[:, :3, 3], quaternions], axis=1)
 
 
 def pose_to_SE3(pose_mat: np.ndarray) -> np.ndarray:
@@ -31,13 +37,19 @@ def pose_to_SE3(pose_mat: np.ndarray) -> np.ndarray:
     :param pose_mat: N个pose, shape: (N, 7), tx, ty, tz, qw, qx, qy, qz
     :return: N个SE(3)
     """
-    pose_mat = pose_mat[None, ...] if pose_mat.ndim == 1 else pose_mat
-    SE3_mat = np.apply_along_axis(
-        lambda x: np.block([
-            [qmt.quatToRotMat(Quaternion(x[3:])), x[:3].reshape((3, 1))],
-            [np.zeros((1, 3)), 1]
-        ]), 1, pose_mat
-    )
+    pose_mat = np.asarray(pose_mat, dtype=np.float64)
+    if pose_mat.ndim == 1:
+        if pose_mat.shape != (7,):
+            raise ValueError(f"single pose input must have shape (7,), got {pose_mat.shape}")
+        pose_mat = pose_mat[None, ...]
+    elif pose_mat.ndim != 2 or pose_mat.shape[1] != 7:
+        raise ValueError(f"pose input must have shape (7,) or (N, 7), got {pose_mat.shape}")
+
+    rotations = qmt.quatToRotMat(pose_mat[:, 3:])
+    SE3_mat = np.zeros((pose_mat.shape[0], 4, 4), dtype=np.float64)
+    SE3_mat[:, :3, :3] = rotations
+    SE3_mat[:, :3, 3] = pose_mat[:, :3]
+    SE3_mat[:, 3, 3] = 1.0
     return SE3_mat
 
 

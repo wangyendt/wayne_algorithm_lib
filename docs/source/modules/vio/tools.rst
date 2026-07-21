@@ -11,6 +11,9 @@ VIO 工具函数 (tools)
 - 将 pose 表示转换为 SE(3) 矩阵
 - 使用 3D 可视化工具展示 pose 信息
 
+``SE3_to_pose`` 和 ``pose_to_SE3`` 均使用 qmt/NumPy 批量运算。为保持历史 API，单个输入也保留
+长度为 1 的批次维度，分别返回 ``(1, 7)`` 和 ``(1, 4, 4)``。
+
 函数说明
 ---------
 
@@ -27,16 +30,16 @@ VIO 工具函数 (tools)
 
    >>> from pywayne.vio.tools import visualize_pose, SE3_to_pose, pose_to_SE3
    >>> import numpy as np
-   >>> 
+   >>>
    >>> # SE3 to Pose
    >>> SE3 = np.eye(4)
    >>> pose = SE3_to_pose(SE3)
    >>> print("Pose:", pose)
-   >>> 
+   >>>
    >>> # Pose to SE3
    >>> SE3_recon = pose_to_SE3(pose)
    >>> print("Reconstructed SE3:\n", SE3_recon)
-   >>> 
+   >>>
    >>> # Visualize Pose
    >>> SE3_array = np.random.randn(5, 4, 4) # Example random data
    >>> # Ensure valid rotation matrices for visualization
@@ -48,4 +51,4 @@ VIO 工具函数 (tools)
    ...     SE3_array[i, 3, :3] = 0
    ...     SE3_array[i, 3, 3] = 1
    >>> poses_to_visualize = SE3_to_pose(SE3_array)
-   >>> # visualize_pose(poses_to_visualize) # Uncomment to display plot 
+   >>> # visualize_pose(poses_to_visualize) # Uncomment to display plot

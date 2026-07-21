@@ -144,10 +144,14 @@ def find_extremum_in_sliding_window(data: list, k: int) -> list:
     maxQueue = collections.deque()
     retMin, retMax = [], []
     for i, n in enumerate(data):
-        if minQueue and i - minQueue[0] >= k: minQueue.popleft()
-        if maxQueue and i - maxQueue[0] >= k: maxQueue.popleft()
-        while minQueue and n < data[minQueue[-1]]: minQueue.pop()
-        while maxQueue and n > data[maxQueue[-1]]: maxQueue.pop()
+        if minQueue and i - minQueue[0] >= k:
+            minQueue.popleft()
+        if maxQueue and i - maxQueue[0] >= k:
+            maxQueue.popleft()
+        while minQueue and n < data[minQueue[-1]]:
+            minQueue.pop()
+        while maxQueue and n > data[maxQueue[-1]]:
+            maxQueue.pop()
         minQueue.append(i)
         maxQueue.append(i)
         retMin.append(data[minQueue[0]])
@@ -433,6 +437,90 @@ class CalcEnergy:
         return energy
 
 
+_NUMBA_DTW_IMPL = None
+_NUMBA_DTW_IMPORT_ERROR = None
+_NUMBA_DTW_LOAD_ATTEMPTED = False
+
+
+def _dtw_scores_impl(x: np.ndarray, y: np.ndarray, local_k: int) -> np.ndarray:
+    """Compute the historical per-channel DTW scores used by CurveSimilarity."""
+    m, n, channels = x.shape[0], y.shape[0], x.shape[1]
+    distance = (x[:, None, :] - y[None, :, :]) ** 2
+
+    # Keep the historical initialization and path/tie-breaking semantics so the
+    # optional accelerated backend remains numerically compatible.
+    dp = np.zeros((m, n, channels), dtype=np.float64)
+    dp[0, 0, 0] = distance[0, 0, 0]
+    for i in range(1, m):
+        dp[i, 0] = dp[i - 1, 0] + distance[i, 0]
+    for j in range(1, n):
+        dp[0, j] = dp[0, j - 1] + distance[0, j]
+    for i in range(1, m):
+        for j in range(1, n):
+            for channel in range(channels):
+                dp[i, j, channel] = min(
+                    dp[i - 1, j - 1, channel],
+                    dp[i - 1, j, channel],
+                    dp[i, j - 1, channel],
+                ) + distance[i, j, channel]
+
+    scores = np.empty(channels, dtype=np.float64)
+    for channel in range(channels):
+        residuals = np.empty(m + n + 1, dtype=np.float64)
+        path_length = 1
+        pm, pn = m - 1, n - 1
+        residuals[0] = distance[pm, pn, channel]
+
+        while pm > 0 and pn > 0:
+            up = dp[pm - 1, pn, channel]
+            left = dp[pm, pn - 1, channel]
+            diagonal = dp[pm - 1, pn - 1, channel]
+
+            # np.argmin([up, left, diagonal]) with deterministic first-min tie
+            # breaking, expressed without a temporary array for Numba.
+            if up <= left and up <= diagonal:
+                pm -= 1
+            elif left <= diagonal:
+                pn -= 1
+            else:
+                pm -= 1
+                pn -= 1
+
+            residuals[path_length] = distance[pm, pn, channel]
+            path_length += 1
+
+        # The original implementation always appended the origin after leaving
+        # the loop, including when the last diagonal step already reached it.
+        residuals[path_length] = distance[0, 0, channel]
+        path_length += 1
+
+        if local_k > 0:
+            if local_k > path_length:
+                raise ValueError("local DTW window cannot exceed the alignment path length")
+            ordered = np.sort(residuals[:path_length])
+            scores[channel] = np.mean(ordered[path_length - local_k:path_length])
+        else:
+            scores[channel] = np.mean(residuals[:path_length])
+
+    return scores
+
+
+def _get_numba_dtw_impl():
+    """Lazily compile the DTW kernel, keeping Numba an optional dependency."""
+    global _NUMBA_DTW_IMPL, _NUMBA_DTW_IMPORT_ERROR, _NUMBA_DTW_LOAD_ATTEMPTED
+
+    if not _NUMBA_DTW_LOAD_ATTEMPTED:
+        _NUMBA_DTW_LOAD_ATTEMPTED = True
+        try:
+            from numba import njit
+        except ImportError as error:
+            _NUMBA_DTW_IMPORT_ERROR = error
+        else:
+            _NUMBA_DTW_IMPL = njit(cache=True)(_dtw_scores_impl)
+
+    return _NUMBA_DTW_IMPL
+
+
 class CurveSimilarity:
     """
     用于计算曲线x和曲线y的相似度
@@ -452,12 +540,16 @@ class CurveSimilarity:
 
     @staticmethod
     def _check(var):
-        if np.ndim(var) == 1:
-            return np.reshape(var, (-1, 1))
-        else:
-            return np.array(var)
+        array = np.asarray(var, dtype=np.float64)
+        if array.ndim == 1:
+            array = array.reshape((-1, 1))
+        elif array.ndim != 2:
+            raise ValueError("DTW input must be a 1D or 2D array")
+        if array.shape[0] == 0:
+            raise ValueError("DTW input must not be empty")
+        return np.ascontiguousarray(array)
 
-    def dtw(self, x, y, mode='global', *params):
+    def dtw(self, x, y, mode='global', *params, backend='auto'):
         """
         计算曲线x和曲线y的DTW距离，其中global方法将全部数据用于DTW计算，local方法将一部分数据用于DTW计算
         x和y的行数代表数据长度，需要x和y的列数相同
@@ -465,57 +557,41 @@ class CurveSimilarity:
         :param y: 第二条曲线
         :param mode: 'local'用于计算局部DTW，'global'用于计算全局DTW
         :param params: 若为local DTW，则params为local的窗长
+        :param backend: 'auto'、'python'或'numba'。auto优先使用Numba，未安装时回退Python
         :return: 曲线x和曲线y的DTW距离
         """
         x, y = self._check(x), self._check(y)
-        m, n, p = x.shape[0], y.shape[0], x.shape[1]
-        assert x.shape[1] == y.shape[1]
-        distance = np.reshape(
-            [(x[i, ch] - y[j, ch]) ** 2 for i in range(m) for j in range(n) for ch in range(p)],
-            [m, n, p]
-        )
-        dp = np.zeros((m, n, p))
-        dp[0, 0, 0] = distance[0, 0, 0]
-        for i in range(1, m):
-            dp[i, 0] = dp[i - 1, 0] + distance[i, 0]
-        for j in range(1, n):
-            dp[0, j] = dp[0, j - 1] + distance[0, j]
-        for i in range(1, m):
-            for j in range(1, n):
-                for ch in range(p):
-                    dp[i, j, ch] = min(
-                        dp[i - 1, j - 1, ch],
-                        dp[i - 1, j, ch],
-                        dp[i, j - 1, ch]
-                    ) + distance[i, j, ch]
-        path = [[[m - 1, n - 1]] for _ in range(p)]
-        for ch in range(p):
-            pm, pn = m - 1, n - 1
-            while pm > 0 and pn > 0:
-                if pm == 0:
-                    pn -= 1
-                elif pn == 0:
-                    pm -= 1
-                else:
-                    c = np.argmin([dp[pm - 1, pn, ch], dp[pm, pn - 1, ch], dp[pm - 1, pn - 1, ch]])
-                    if c == 0:
-                        pm -= 1
-                    elif c == 1:
-                        pn -= 1
-                    else:
-                        pm -= 1
-                        pn -= 1
-                path[ch].append([pm, pn])
-            path[ch].append([0, 0])
-        ret = [[(x[path[ch][pi][0], ch] - y[path[ch][pi][1], ch]) ** 2
-                for pi in range(len(path[ch]))] for ch in range(p)]
+        if x.shape[1] != y.shape[1]:
+            raise ValueError("DTW inputs must have the same number of channels")
+
         if mode == 'global':
-            return np.squeeze([np.mean(r) for r in ret])
+            if params:
+                raise ValueError("global DTW does not accept a local window")
+            local_k = 0
         elif mode == 'local':
-            k = params[0]
-            return np.squeeze([
-                np.array(r)[np.argpartition(r, -k)[-k:]].mean() for r in ret
-            ])
+            if len(params) != 1 or not isinstance(params[0], (int, np.integer)):
+                raise ValueError("local DTW requires one integer window argument")
+            local_k = int(params[0])
+            if local_k <= 0:
+                raise ValueError("local DTW window must be positive")
+        else:
+            raise ValueError("mode must be 'global' or 'local'")
+
+        if backend not in {'auto', 'python', 'numba'}:
+            raise ValueError("backend must be 'auto', 'python', or 'numba'")
+
+        implementation = _dtw_scores_impl
+        if backend in {'auto', 'numba'}:
+            numba_impl = _get_numba_dtw_impl()
+            if numba_impl is not None:
+                implementation = numba_impl
+            elif backend == 'numba':
+                raise ImportError(
+                    "Numba backend requested but numba is not installed; "
+                    "install pywayne[performance] or numba"
+                ) from _NUMBA_DTW_IMPORT_ERROR
+
+        return np.squeeze(implementation(x, y, local_k))
 
 
 class SignalDetrend:
@@ -688,14 +764,16 @@ class SignalDetrend:
 
 class ButterworthFilter:
     """
-    纯 numpy 的 1D IIR 滤波器：
-      - lfilter: Direct Form II Transposed（对齐 SciPy 的实现形态）
-      - lfilter_zi: 解线性方程得到稳态初始条件
+    基于 NumPy 的 1D IIR 滤波器：
+      - BA: Direct Form II Transposed，对齐 SciPy ``lfilter``/``filtfilt``
+      - SOS: 二阶节级联 DF2T，对齐 SciPy ``sosfilt``/``sosfiltfilt``
+      - zi: 支持稳态初始条件和跨分段传递状态
       - filtfilt: pad 方法（odd/even/constant/None），默认 padlen=3*ntaps
 
-    支持两种构造：
+    支持三种构造：
       - from_ba(b,a)
-      - from_params(order, fs, btype, cutoff)
+      - from_sos(sos)
+      - from_params(order, fs, btype, cutoff, output='ba'|'sos')
 
     cache_zi：
       - True: 构造时预计算 zi
@@ -715,6 +793,8 @@ class ButterworthFilter:
             b = b / a[0]
             a = a / a[0]
 
+        self._mode = "ba"
+        self._sos = None
         self._ntaps = int(max(a.size, b.size))
         self._nstate = self._ntaps - 1
         self._a = self._pad_to_len(a, self._ntaps)
@@ -731,6 +811,28 @@ class ButterworthFilter:
         return cls(np.asarray(b, dtype=np.float64), np.asarray(a, dtype=np.float64), cache_zi=cache_zi)
 
     @classmethod
+    def from_sos(
+        cls,
+        sos: Union[np.ndarray, Iterable[Iterable[float]]],
+        cache_zi: bool = True,
+    ) -> "ButterworthFilter":
+        """Create a filter from SciPy-format SOS rows.
+
+        Each row must contain ``[b0, b1, b2, a0, a1, a2]``. Sections are
+        normalized independently so that every ``a0`` equals one.
+        """
+        normalized = cls._normalize_sos(sos)
+        obj = cls.__new__(cls)
+        obj._mode = "sos"
+        obj._sos = normalized
+        obj._a = None
+        obj._b = None
+        obj._ntaps = cls._sos_ntaps(normalized)
+        obj._nstate = 2 * normalized.shape[0]
+        obj._zi = cls._sosfilt_zi_impl(normalized) if cache_zi else None
+        return obj
+
+    @classmethod
     def from_params(
         cls,
         order: int,
@@ -738,14 +840,34 @@ class ButterworthFilter:
         btype: str,
         cutoff: Union[float, Tuple[float, float]],
         cache_zi: bool = True,
+        output: str = "ba",
     ) -> "ButterworthFilter":
         """
-        纯 numpy Butterworth 设计（数字域），cutoff 单位 Hz：
+        Butterworth 设计（数字域），cutoff 单位 Hz：
           - btype: 'lowpass' | 'highpass' | 'bandpass' | 'bandstop'
           - cutoff:
               low/high: float
               band*: (low, high)
+          - output: 'ba' | 'sos'
+
+        ``output='ba'`` 保留原有的纯 NumPy 设计路径；``output='sos'``
+        使用 SciPy 的 Butterworth SOS 配对生成系数，再由本类的 NumPy
+        SOS 核心执行滤波。
         """
+        output = output.lower()
+        if output not in ("ba", "sos"):
+            raise ValueError("output must be 'ba' or 'sos'")
+        if output == "sos":
+            sos = butter(
+                order,
+                cutoff,
+                btype=btype,
+                analog=False,
+                output="sos",
+                fs=fs,
+            )
+            return cls.from_sos(sos, cache_zi=cache_zi)
+
         b, a = cls._butter_ba(order=order, fs=fs, btype=btype, cutoff=cutoff)
         return cls(b, a, cache_zi=cache_zi)
 
@@ -753,7 +875,19 @@ class ButterworthFilter:
 
     @property
     def ba(self) -> Tuple[np.ndarray, np.ndarray]:
+        if self._mode != "ba":
+            raise RuntimeError("ba coefficients are unavailable for an SOS filter")
         return self._b.copy(), self._a.copy()
+
+    @property
+    def sos(self) -> np.ndarray:
+        if self._mode != "sos":
+            raise RuntimeError("sos coefficients are unavailable for a BA filter")
+        return self._sos.copy()
+
+    @property
+    def mode(self) -> str:
+        return self._mode
 
     @property
     def ntaps(self) -> int:
@@ -768,8 +902,28 @@ class ButterworthFilter:
         if self._nstate <= 0:
             return np.zeros(0, dtype=np.float64)
         if self._zi is None:
-            self._zi = self._lfilter_zi_impl(self._b, self._a)
+            if self._mode == "sos":
+                self._zi = self._sosfilt_zi_impl(self._sos)
+            else:
+                self._zi = self._lfilter_zi_impl(self._b, self._a)
         return self._zi.copy()
+
+    @staticmethod
+    def lfilter_zi(
+        b: Union[np.ndarray, Iterable[float]],
+        a: Union[np.ndarray, Iterable[float]],
+    ) -> np.ndarray:
+        """Return steady-state initial conditions equivalent to SciPy ``lfilter_zi``."""
+        filt = ButterworthFilter.from_ba(b, a, cache_zi=False)
+        return filt.zi()
+
+    @staticmethod
+    def sosfilt_zi(
+        sos: Union[np.ndarray, Iterable[Iterable[float]]],
+    ) -> np.ndarray:
+        """Return ``(n_sections, 2)`` initial conditions like SciPy ``sosfilt_zi``."""
+        normalized = ButterworthFilter._normalize_sos(sos)
+        return ButterworthFilter._sosfilt_zi_impl(normalized)
 
     # ---------- public filtering APIs ----------
 
@@ -783,6 +937,9 @@ class ButterworthFilter:
         返回 (y, zf)
         """
         x = self._as_f64_1d(x)
+        if self._mode == "sos":
+            return self._sosfilt(x, zi)
+
         n = self._nstate
         if n <= 0:
             y = (self._b[0] * x).astype(np.float64, copy=False)
@@ -817,6 +974,36 @@ class ButterworthFilter:
 
         return y, z
 
+    def _sosfilt(
+        self,
+        x: np.ndarray,
+        zi: Optional[Union[np.ndarray, Iterable[float]]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        n_sections = self._sos.shape[0]
+        if zi is None:
+            z = np.zeros((n_sections, 2), dtype=np.float64)
+        else:
+            z = np.asarray(zi, dtype=np.float64)
+            if z.size != 2 * n_sections:
+                raise ValueError(
+                    f"zi must have shape ({n_sections}, 2) or length {2 * n_sections}"
+                )
+            z = z.reshape(n_sections, 2).copy()
+
+        y = np.empty_like(x, dtype=np.float64)
+        sos = self._sos
+        for k, sample in enumerate(x):
+            xi = sample
+            for section in range(n_sections):
+                b0, b1, b2, _, a1, a2 = sos[section]
+                yi = b0 * xi + z[section, 0]
+                z1 = b1 * xi - a1 * yi + z[section, 1]
+                z2 = b2 * xi - a2 * yi
+                z[section, 0] = z1
+                z[section, 1] = z2
+                xi = yi
+            y[k] = xi
+        return y, z
 
     def filtfilt(
         self,
@@ -886,6 +1073,30 @@ class ButterworthFilter:
         return out
 
     @staticmethod
+    def _normalize_sos(
+        sos: Union[np.ndarray, Iterable[Iterable[float]]],
+    ) -> np.ndarray:
+        sos = np.asarray(sos, dtype=np.float64)
+        if sos.ndim != 2 or sos.shape[1] != 6 or sos.shape[0] == 0:
+            raise ValueError("sos must have shape (n_sections, 6)")
+        if not np.all(np.isfinite(sos)):
+            raise ValueError("sos coefficients must be finite")
+        if np.any(sos[:, 3] == 0.0):
+            raise ValueError("each SOS section must have a nonzero a0")
+
+        normalized = sos.copy()
+        normalized /= normalized[:, 3, None]
+        normalized[:, 3] = 1.0
+        return normalized
+
+    @staticmethod
+    def _sos_ntaps(sos: np.ndarray) -> int:
+        n_sections = sos.shape[0]
+        zeros_at_origin = int(np.count_nonzero(sos[:, 2] == 0.0))
+        poles_at_origin = int(np.count_nonzero(sos[:, 5] == 0.0))
+        return 2 * n_sections + 1 - min(zeros_at_origin, poles_at_origin)
+
+    @staticmethod
     def _pad(x: np.ndarray, edge: int, padtype: str) -> np.ndarray:
         if padtype == "odd":
             x0, xN = x[0], x[-1]
@@ -926,6 +1137,23 @@ class ButterworthFilter:
         b0 = b[0]
         B = np.array([b[i + 1] - a[i + 1] * b0 for i in range(n)], dtype=np.float64)
         zi = ButterworthFilter._solve_linear(IA, B)
+        return zi
+
+    @staticmethod
+    def _sosfilt_zi_impl(sos: np.ndarray) -> np.ndarray:
+        zi = np.empty((sos.shape[0], 2), dtype=np.float64)
+        cumulative_gain = 1.0
+        for section, row in enumerate(sos):
+            b0, b1, b2, _, a1, a2 = row
+            denominator = 1.0 + a1 + a2
+            if abs(denominator) < 1e-18:
+                raise ValueError("cannot compute sosfilt_zi: section has zero DC denominator")
+            section_gain = (b0 + b1 + b2) / denominator
+
+            # DF2T steady state for a unit step, scaled by all preceding sections.
+            zi[section, 0] = cumulative_gain * (section_gain - b0)
+            zi[section, 1] = cumulative_gain * (b2 - a2 * section_gain)
+            cumulative_gain *= section_gain
         return zi
 
     # ---------- detrend helpers ----------

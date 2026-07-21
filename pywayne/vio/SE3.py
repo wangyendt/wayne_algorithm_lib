@@ -68,23 +68,22 @@ T_mean = SE3_mean(T_matrices)
 - SE3_log: ~0.9 ms
 """
 
-import numpy as np
-import qmt
 import math
-import time
-import sys
 import os
+import sys
+import time
+
+import numpy as np
 
 # 添加当前目录到路径并导入SO3
 current_dir = os.path.dirname(__file__)
 sys.path.append(current_dir)
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
-from pywayne.tools import wayne_print
-from scipy.spatial.transform import Rotation
+from pywayne.tools import wayne_print  # noqa: E402
 
 # 直接导入SO3文件
-import SO3
+import SO3  # noqa: E402
 
 def check_SE3(T: np.ndarray) -> bool:
     """
@@ -122,12 +121,6 @@ def SE3_skew(xi: np.ndarray) -> np.ndarray:
         single_matrix = True
     else:
         single_matrix = False
-    
-    N = xi.shape[0]
-    
-    # 分离平移和旋转部分
-    rho = xi[:, :3]  # 平移部分
-    theta = xi[:, 3:]  # 旋转部分
     
     # 使用einsum构建SE(3)李代数矩阵
     # 创建4x4模板
@@ -526,23 +519,28 @@ def SE3_inv(T: np.ndarray) -> np.ndarray:
     Returns:
         T_inv: Nx4x4 or 4x4 inverse transformation matrix
     """
-    if T.ndim == 2:
-        R = T[:3, :3]
-        t = T[:3, 3]
-        T_inv = np.eye(4)
-        T_inv[:3, :3] = R.T
-        T_inv[:3, 3] = -R.T @ t
-        return T_inv
+    T = np.asarray(T)
+    single_transform = T.ndim == 2
+    if single_transform:
+        if T.shape != (4, 4):
+            raise ValueError(f"single SE(3) input must have shape (4, 4), got {T.shape}")
+        batch = T[None, ...]
+    elif T.ndim == 3 and T.shape[1:] == (4, 4):
+        batch = T
     else:
-        N = T.shape[0]
-        T_inv = np.zeros((N, 4, 4))
-        for i in range(N):
-            R = T[i, :3, :3]
-            t = T[i, :3, 3]
-            T_inv[i] = np.eye(4)
-            T_inv[i, :3, :3] = R.T
-            T_inv[i, :3, 3] = -R.T @ t
-        return T_inv
+        raise ValueError(f"SE(3) input must have shape (4, 4) or (N, 4, 4), got {T.shape}")
+
+    output_dtype = np.result_type(batch.dtype, np.float64)
+    inverse = np.zeros(batch.shape, dtype=output_dtype)
+    rotation_transpose = np.swapaxes(batch[:, :3, :3], 1, 2)
+    inverse[:, :3, :3] = rotation_transpose
+    inverse[:, :3, 3] = -np.einsum(
+        "nij,nj->ni",
+        rotation_transpose,
+        batch[:, :3, 3],
+    )
+    inverse[:, 3, 3] = 1.0
+    return inverse[0] if single_transform else inverse
 
 def SE3_unskew(xi_hat: np.ndarray) -> np.ndarray:
     """

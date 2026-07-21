@@ -54,6 +54,9 @@ SE(3)是特殊欧几里得群，表示三维空间中的刚体变换。SE(3)群�
 
 计算变换矩阵的逆。
 
+同时支持 ``(4, 4)`` 单个矩阵和 ``(N, 4, 4)`` 批量矩阵；批量输入使用 NumPy
+向量化计算，不逐个遍历变换矩阵。
+
 反对称矩阵操作
 ~~~~~~~~~~~~~~~
 
@@ -158,9 +161,9 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 对于6D向量 :math:`\xi = [\rho, \theta]^T`：
 
 .. math::
-   \exp(\xi^\wedge) = \begin{bmatrix} 
-   \exp(\theta^\wedge) & V\rho \\ 
-   0^T & 1 
+   \exp(\xi^\wedge) = \begin{bmatrix}
+   \exp(\theta^\wedge) & V\rho \\
+   0^T & 1
    \end{bmatrix}
 
 其中V矩阵定义为：
@@ -178,18 +181,18 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 
    import numpy as np
    from pywayne.vio.SE3 import *
-   
+
    # 创建SE(3)变换矩阵
    R = np.eye(3)  # 无旋转
    t = np.array([1, 2, 3])  # 平移向量
    T = SE3_from_Rt(R, t)
-   
+
    print(f"SE3矩阵:\n{T}")
    print(f"是否为有效SE3: {check_SE3(T)}")
-   
+
    # 计算逆变换
    T_inv = SE3_inv(T)
-   
+
    # 验证 T @ T^(-1) = I
    identity_check = SE3_mul(T, T_inv)
    print(f"与单位矩阵的误差: {np.linalg.norm(identity_check - np.eye(4)):.2e}")
@@ -203,7 +206,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
    xi = np.array([0.1, 0.2, 0.3, 0.1, 0.2, 0.3])  # [ρ, θ]
    xi_hat = SE3_skew(xi)
    print(f"SE3李代数矩阵:\n{xi_hat}")
-   
+
    # 从李代数矩阵恢复6D向量
    recovered_xi = SE3_unskew(xi_hat)
    print(f"恢复向量: {recovered_xi}")
@@ -223,7 +226,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
    ])
    t = np.array([1, 2, 3])
    T = SE3_from_Rt(R, t)
-   
+
    # 分解为旋转和平移
    R_recovered, t_recovered = SE3_to_Rt(T)
    print(f"旋转矩阵误差: {np.linalg.norm(R - R_recovered):.2e}")
@@ -237,15 +240,15 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
    # 对数映射 - 向量形式
    log_vec = SE3_Log(T)
    print(f"对数映射向量: {log_vec}")
-   
-   # 对数映射 - 矩阵形式  
+
+   # 对数映射 - 矩阵形式
    log_mat = SE3_log(T)
    print(f"对数映射矩阵:\n{log_mat}")
-   
+
    # 指数映射 - 从向量
    T_from_exp = SE3_Exp(log_vec)
    print(f"指数映射(向量)误差: {np.linalg.norm(T - T_from_exp):.2e}")
-   
+
    # 指数映射 - 从矩阵
    T_from_exp_mat = SE3_exp(log_mat)
    print(f"指数映射(矩阵)误差: {np.linalg.norm(T - T_from_exp_mat):.2e}")
@@ -257,21 +260,21 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 
    # 创建多个随机变换
    n_transforms = 50
-   
+
    # 随机旋转
    random_axis = np.random.randn(n_transforms, 3)
    random_axis = random_axis / np.linalg.norm(random_axis, axis=1, keepdims=True)
    random_angles = np.random.uniform(0, np.pi, n_transforms)
-   
+
    # 随机平移
    random_trans = np.random.randn(n_transforms, 3) * 10
-   
+
    # 批量生成SE(3)矩阵
    T_batch = SE3_from_axis_angle_trans(random_axis, random_angles, random_trans)
-   
+
    # 批量转换为四元数+平移
    quat_batch, trans_batch = SE3_to_quat_trans(T_batch)
-   
+
    # 计算平均变换
    T_mean = SE3_mean(T_batch)
    print(f"平均变换矩阵是否有效: {check_SE3(T_mean)}")
@@ -284,7 +287,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
    # 模拟机器人轨迹
    n_poses = 100
    time_steps = np.linspace(0, 2*np.pi, n_poses)
-   
+
    # 圆形轨迹
    radius = 5.0
    positions = np.column_stack([
@@ -292,7 +295,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
        radius * np.sin(time_steps),
        np.ones(n_poses) * 2.0  # 固定高度
    ])
-   
+
    # 计算朝向（切线方向）
    orientations = []
    for i, t in enumerate(time_steps):
@@ -304,20 +307,20 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
            [0,            0,           1]
        ])
        orientations.append(R)
-   
+
    # 构造轨迹的SE(3)表示
    trajectory = []
    for R, t in zip(orientations, positions):
        T = SE3_from_Rt(R, t)
        trajectory.append(T)
    trajectory = np.array(trajectory)
-   
+
    # 计算相邻帧之间的相对变换
    relative_transforms = []
    for i in range(len(trajectory) - 1):
        rel_T = SE3_diff(trajectory[i], trajectory[i+1])
        relative_transforms.append(rel_T)
-   
+
    print(f"轨迹包含 {len(trajectory)} 个姿态")
    print(f"计算了 {len(relative_transforms)} 个相对变换")
 
@@ -330,25 +333,25 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
    def camera_pose_estimation():
        # 模拟相机在世界坐标系中的位置和朝向
        camera_position = np.array([2, 3, 5])
-       
+
        # 相机朝向原点，up方向为z轴
        forward = -camera_position / np.linalg.norm(camera_position)
        up = np.array([0, 0, 1])
        right = np.cross(forward, up)
        right = right / np.linalg.norm(right)
        up = np.cross(right, forward)
-       
+
        # 构造旋转矩阵（相机坐标系到世界坐标系）
        R_cam_to_world = np.column_stack([right, up, forward])
-       
+
        # 构造SE(3)变换
        T_cam_to_world = SE3_from_Rt(R_cam_to_world, camera_position)
-       
+
        # 计算世界坐标系到相机坐标系的变换
        T_world_to_cam = SE3_inv(T_cam_to_world)
-       
+
        return T_cam_to_world, T_world_to_cam
-   
+
    T_c2w, T_w2c = camera_pose_estimation()
    print(f"相机到世界变换:\n{T_c2w}")
    print(f"世界到相机变换:\n{T_w2c}")
@@ -368,7 +371,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 基于1000个变换矩阵的性能测试结果：
 
 - SE3_Exp: ~2.5ms (6D向量→SE(3))
-- SE3_exp: ~2.5ms (4×4矩阵→SE(3))  
+- SE3_exp: ~2.5ms (4×4矩阵→SE(3))
 - SE3_Log: ~0.8ms (SE(3)→6D向量)
 - SE3_log: ~0.9ms (SE(3)→4×4矩阵)
 - SE3_mean: ~15ms (多个SE(3)→平均SE(3))
@@ -376,7 +379,7 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 应用场景
 --------
 
-1. **机器人学**: 
+1. **机器人学**:
    - 运动规划和控制
    - 机械臂正逆运动学
    - 移动机器人定位
@@ -417,4 +420,4 @@ se(3) → SE(3)的指数映射，从4×4矩阵生成变换矩阵。
 1. **维度错误**: 确保输入数组的形状正确，使用reshape调整维度
 2. **非刚体变换**: 检查输入矩阵是否满足SE(3)的约束条件
 3. **奇异情况**: 180度旋转附近注意数值稳定性
-4. **内存问题**: 大批量处理时注意内存使用，考虑分批处理 
+4. **内存问题**: 大批量处理时注意内存使用，考虑分批处理

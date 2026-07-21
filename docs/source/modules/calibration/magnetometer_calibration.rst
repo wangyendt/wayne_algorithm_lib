@@ -5,9 +5,9 @@
 
 该类用于对磁力计数据进行校准，具体步骤包括：
 
-- 使用传感器数据逐步累积计算校准矩阵 P_k。
+- 使用 VQF 批处理传感器数据，并批量构造、累积校准矩阵 P_k。
 - 根据 P_k 的最小特征向量计算软铁矩阵 Sm、硬铁偏差向量 h，以及初始磁场 m_i0。
-- 最终，通过 process 方法整理数据并输出校准参数。
+- ``process`` 只对最终累积矩阵求一次特征向量，避免逐样本重复特征分解。
 
 .. autoclass:: pywayne.calibration.magnetometer_calibration.MagnetometerCalibrator
    :members:
@@ -22,4 +22,4 @@
    >>> calibrator = MagnetometerCalibrator()
    >>> Sm, h = calibrator.process(ts, acc, gyro, mag)
    >>> print("软铁矩阵:", Sm)
-   >>> print("硬铁偏差:", h) 
+   >>> print("硬铁偏差:", h)

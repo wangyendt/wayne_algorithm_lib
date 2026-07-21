@@ -11,7 +11,7 @@
 import numpy as np
 from vqf import VQF
 import qmt
-from typing import Tuple, Generator, List
+from typing import Tuple, Generator
 
 
 class MagnetometerCalibrator:
@@ -32,6 +32,67 @@ class MagnetometerCalibrator:
         """
         self.method = method
 
+    @staticmethod
+    def _validate_inputs(
+        ts: np.ndarray,
+        acc: np.ndarray,
+        gyro: np.ndarray,
+        mag: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        ts = np.asarray(ts, dtype=np.float64)
+        acc = np.ascontiguousarray(acc, dtype=np.float64)
+        gyro = np.ascontiguousarray(gyro, dtype=np.float64)
+        mag = np.ascontiguousarray(mag, dtype=np.float64)
+
+        if ts.ndim != 1 or ts.size < 2:
+            raise ValueError("ts must be a 1D array with at least two samples")
+        expected_shape = (ts.size, 3)
+        for name, values in (("acc", acc), ("gyro", gyro), ("mag", mag)):
+            if values.shape != expected_shape:
+                raise ValueError(f"{name} must have shape {expected_shape}, got {values.shape}")
+        if not all(np.all(np.isfinite(values)) for values in (ts, acc, gyro, mag)):
+            raise ValueError("sensor inputs must contain only finite values")
+
+        dt = float(np.mean(np.diff(ts)))
+        if dt <= 0.0:
+            raise ValueError("timestamps must have a positive mean sampling interval")
+        return ts, acc, gyro, mag
+
+    @staticmethod
+    def _smallest_eigenvector(matrix: np.ndarray) -> np.ndarray:
+        eigenvalues, eigenvectors = np.linalg.eig(matrix)
+        vector = eigenvectors[:, np.abs(eigenvalues).argmin()]
+        normalizer = np.linalg.norm(vector[-3:])
+        if normalizer == 0.0:
+            raise ValueError("magnetometer calibration is degenerate")
+        vector = vector / normalizer
+        return vector if vector[0] > 0 else -vector
+
+    @staticmethod
+    def _build_pk_matrices(
+        ts: np.ndarray,
+        acc: np.ndarray,
+        gyro: np.ndarray,
+        mag: np.ndarray,
+    ) -> np.ndarray:
+        """Build all per-sample P_k matrices using compiled/batched operations."""
+        dt = float(np.mean(np.diff(ts)))
+        vqf = VQF(gyrTs=dt)
+        vqf.setTauAcc(3.0)
+        quaternions = vqf.updateBatch(gyro, acc)["quat6D"]
+
+        relative_quaternions = qmt.qmult(qmt.qinv(quaternions[0]), quaternions)
+        rotations = qmt.quatToRotMat(relative_quaternions)
+        magnetic_blocks = np.concatenate(
+            [mag[:, index, None, None] * rotations for index in range(3)],
+            axis=2,
+        )
+        identity_blocks = np.broadcast_to(-np.eye(3), rotations.shape)
+        return np.concatenate(
+            [magnetic_blocks, -rotations, identity_blocks],
+            axis=2,
+        )
+
     def _calc_pk(self, ts: np.ndarray, acc: np.ndarray, gyro: np.ndarray, mag: np.ndarray) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
         """
         Calculates the calibration matrix P_k for the magnetometer using sensor data.
@@ -45,35 +106,25 @@ class MagnetometerCalibrator:
         Yields:
             tuple: A tuple containing the minimum eigenvector x_min and the matrix P_k_2 at each iteration.
         """
-        # mag = mag / np.linalg.norm(mag, axis=1, keepdims=True)
-        dt = np.mean(np.diff(ts))
-        N = ts.shape[0]
-        vqf = VQF(gyrTs=dt)
-        vqf.setTauAcc(3.0)
-        C_i0_b = []
-        q0 = np.array([1, 0, 0, 0], dtype=float)
-        P_k_2 = np.zeros((15, 15))
-        for i in range(N):
-            vqf.updateGyr(gyro[i])
-            vqf.updateAcc(acc[i])
-            q_k = vqf.getQuat6D()
-            if i == 0:
-                q0 = q_k
-            C_i0_b.append(qmt.quatToRotMat(
-                qmt.qmult(qmt.qinv(q0), q_k)
-            ))
-            y_m = mag[i].reshape((3, 1))
-            p_k = np.c_[
-                np.kron(y_m.T, C_i0_b[-1]),
-                -C_i0_b[-1],
-                -np.eye(3)
-            ]  # (3,15)
-            P_k_2 = P_k_2 + p_k.T @ p_k
-            e_val, e_vec = np.linalg.eig(P_k_2)  # sp.linalg.eigh(P_k_2)
-            e_val = np.abs(e_val)
-            e_vec_min = e_vec[:, e_val.argmin()]
-            x_min = e_vec_min / np.linalg.norm(e_vec_min[-3:])
-            yield x_min if x_min[0] > 0 else -x_min, P_k_2
+        ts, acc, gyro, mag = self._validate_inputs(ts, acc, gyro, mag)
+        p_matrices = self._build_pk_matrices(ts, acc, gyro, mag)
+        accumulated = np.zeros((15, 15), dtype=np.float64)
+        for p_k in p_matrices:
+            accumulated = accumulated + p_k.T @ p_k
+            yield self._smallest_eigenvector(accumulated), accumulated
+
+    def _calc_pk_final(
+        self,
+        ts: np.ndarray,
+        acc: np.ndarray,
+        gyro: np.ndarray,
+        mag: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Calculate only the final solution used by process(), without N eig calls."""
+        ts, acc, gyro, mag = self._validate_inputs(ts, acc, gyro, mag)
+        p_matrices = self._build_pk_matrices(ts, acc, gyro, mag)
+        accumulated = np.einsum("nri,nrj->ij", p_matrices, p_matrices)
+        return self._smallest_eigenvector(accumulated), accumulated
 
     def _calc_S_h(self, x_min: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -107,15 +158,8 @@ class MagnetometerCalibrator:
         Returns:
             tuple: A tuple containing the soft-iron matrix (Sm) and the hard-iron vector (h).
         """
-        acc = np.ascontiguousarray(acc)
-        gyro = np.ascontiguousarray(gyro)
-        mag = np.ascontiguousarray(mag)
-
-        Sm = np.eye(3)
-        h = np.zeros(3, )
-
-        for x_min, P_k_2 in self._calc_pk(ts, acc, gyro, mag):
-            Sm, h, m_i0 = self._calc_S_h(x_min)
+        x_min, _ = self._calc_pk_final(ts, acc, gyro, mag)
+        Sm, h, _ = self._calc_S_h(x_min)
 
         print(f'{Sm=}')
         print(f'{h=}')

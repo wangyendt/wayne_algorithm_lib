@@ -15,9 +15,9 @@ MagnetometerCalibrator 类
 
 该类用于对磁力计数据进行校准，具体步骤包括：
 
-- 使用传感器数据逐步累积计算校准矩阵 P_k。
+- 使用 VQF 批处理传感器数据，并批量构造、累积校准矩阵 P_k。
 - 根据 P_k 的最小特征向量计算软铁矩阵 Sm、硬铁偏差向量 h，以及初始磁场 m_i0。
-- 最终，通过 process 方法整理数据并输出校准参数。
+- ``process`` 只对最终累积矩阵求一次特征向量，避免逐样本重复特征分解。
 
 **主要方法**:
 
@@ -35,7 +35,7 @@ MagnetometerCalibrator 类
 
 - process(self, ts: np.ndarray, acc: np.ndarray, gyro: np.ndarray, mag: np.ndarray) -> Tuple[np.ndarray, np.ndarray]
 
-  主接口方法，接收时间戳、加速度计、陀螺仪和磁力计数据，经过内部计算后输出校准参数（软铁矩阵 Sm 和硬铁偏差 h）。
+  主接口方法，接收时间戳、加速度计、陀螺仪和磁力计数据，使用批处理路径输出校准参数（软铁矩阵 Sm 和硬铁偏差 h）。
 
 **示例**::
 
@@ -50,4 +50,4 @@ MagnetometerCalibrator 类
 预留内容 - temporal_calibration
 ------------------------------------
 
-模块中还包含 temporal_calibration.py 文件，用于未来扩展时空校准功能，目前该部分内容尚处于预留阶段。 
+模块中还包含 temporal_calibration.py 文件，用于未来扩展时空校准功能，目前该部分内容尚处于预留阶段。
