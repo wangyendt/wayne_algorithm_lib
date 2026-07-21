@@ -128,6 +128,7 @@ pywayne 是一款集成多种实用功能的 Python 工具库，专注于提供�
    bin/gitstats
    bin/gettool
    bin/cmdlogger
+   bin/toolsetup
 
 贡献指南
 ------------

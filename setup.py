@@ -93,6 +93,9 @@ setuptools.setup(
         'bin/gitstats',    # shell script
         'bin/gitstats.py',  # python script
         'bin/cmdlogger',   # shell script
-        'bin/cmdlogger.py'  # python script
+        'bin/cmdlogger.py',  # python script
+        'bin/toolsetup',    # shell script
+        'bin/toolsetup.py',  # python script
+        'bin/toolsetup.cmd'  # Windows CMD launcher
     ]
 )
